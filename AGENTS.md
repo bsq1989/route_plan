@@ -1,0 +1,115 @@
+# 项目与仿真工具说明
+
+## 项目目标与目录
+
+本项目研究前置消除器小车的目标消除顺序与路径规划。当前已有基于 IR-SIM 的二维几何仿真沙盒，支持中文窗口、手动操作和无窗口 Python 调用，尚未接入自动避障规划或 ROS / Nav2。
+
+- `sim/`：独立仿真工程，拥有自己的 `pyproject.toml` 和 `uv.lock`。仿真代码、配置、依赖和测试均放在此目录。
+- `sim/config/robot.yaml`：默认车辆配置，每次新建 `Scene` 自动读取。
+- `sim/src/route_plan_sim/world.yaml`：地图、初始位姿和场景随机参数。
+- `sim/src/route_plan_sim/scene.py`：几何状态、目标管理、消除与碰撞判定。
+- `sim/src/route_plan_sim/control.py`：map 目标位姿执行器 `PoseController`。
+- `sim/src/route_plan_sim/config.py`：车辆配置加载、校验及场景配置合并。
+- `sim/src/route_plan_sim/app.py`：IR-SIM 显示适配、中文界面与手动控制。
+- `sim/tests/`：配置、规则、控制器和离屏界面测试。
+- `sim/output/`：导出的 PNG、JSON 和临时构建产物，已被 Git 忽略。
+- 后续任务规划算法单独放置，通过仿真公开接口调用，不将策略代码混入显示层。
+
+更完整的交互说明见 `sim/README.md`。
+
+## 启动与验证
+
+以下命令均从仓库根目录运行，使用 `uv` 管理 Python 环境和依赖：
+
+```bash
+# 打开交互窗口
+uv run --project sim route-sim
+
+# 选择预设：front 前方点群、surround 四周包围、random 随机分布
+uv run --project sim route-sim --scenario surround
+uv run --project sim route-sim --scenario random --seed 123
+
+# 指定其他车辆或地图配置
+uv run --project sim route-sim --robot-config /完整路径/robot.yaml
+uv run --project sim route-sim --config /完整路径/world.yaml
+
+# 无窗口导出 PNG 和同名 JSON
+uv run --project sim route-sim --snapshot sim/output/scene.png
+
+# 测试
+uv run --project sim python -m unittest discover -s sim/tests -v
+```
+
+交互模式需要桌面图形环境和中文字体；离屏导出不打开窗口。`--heading`（度）和 `--distance`（米）可在打开窗口或截图前依次执行一次转向和前进。
+
+## 默认车辆与配置约定
+
+以 `sim/config/robot.yaml` 为车辆参数的来源，不在地图文件或算法中重新硬编码默认尺寸：
+
+| 参数 | 当前值 |
+| --- | --- |
+| 车长、车宽 | 0.50 m、0.60 m |
+| 消除区横向宽度、向前深度 | 0.24 m、0.35 m |
+| 每侧车身外扩 | 0.10 m，安全矩形为 0.70 × 0.80 m |
+| 前进、转向速度 | 0.6 m/s、1.2 rad/s，仿真动画用 |
+
+消除区的“24 × 35 cm”目前按宽 24 cm、向前深 35 cm 解释。安装位置暂按居中紧贴车头；pose 参考点和旋转中心暂按车身中心。这些安装假设在用户提供实车信息后再更新，不自行当成已确认的测量值。
+
+- 车体 x 轴向前、y 轴向左。`collector.gap` 为消除区与车头的间距；`lateral_offset` 为左右偏移，正值向左。
+- 目前仅支持 `body_center` 参考点和旋转中心，其他值会报错。
+- 车型选择优先级：显式 `robot_config` / `--robot-config` → 场景的 `custom.robot_config` → 默认车辆文件。场景引用的相对路径以场景文件所在目录为基准。
+- 配置缺失或非法时明确报错，不回退为旧演示尺寸。
+- 界面尺寸调整在本次会话的重置和场景切换中保留，并进入导出的 JSON；不会改写车辆文件。永久修改应编辑 `sim/config/robot.yaml`。
+
+## Python SDK / 算法调用接口
+
+本地 Python 包名为 `route_plan_sim`。导入 `Scene` 和 `PoseController` 不创建窗口，也不加载 IR-SIM 显示层。使用 `uv run --project sim python` 可直接调用；在其他 Python 环境中，可以通过该环境的 `python -m pip install -e /完整路径/route_plan/sim` 安装。
+
+```python
+import math
+from route_plan_sim import Scene, PoseController
+
+scene = Scene(scenario="front")  # 自动加载默认车辆配置
+# 其他选项：Scene(scenario="random", seed=42, robot_config="/完整路径/robot.yaml")
+controller = PoseController(scene)
+
+# map 下的绝对目标位姿。Python API yaw 为弧度。
+controller.set_goal(3.5, 4.5, math.pi / 2)
+while controller.command is not None:
+    controller.step(0.04)
+
+state = scene.snapshot()
+print(state["pose"], state["remaining"], state["failure"])
+```
+
+- `scene.pose`：当前 `(x, y, yaw)`，米、米、弧度。
+- `scene.targets` / `scene.collected`：未消除 / 已消除目标，格式为 `{id: (x, y)}`。
+- `scene.snapshot()`：返回位姿、剩余点、已消除点、失败原因、场景、种子和尺寸。
+- `scene.add_target(x, y)`、`scene.remove_nearest(x, y)`：增删点；安全轮廓内及边界上的点禁止添加。
+- `scene.reset()`：恢复当前预设及同一随机种子的初始状态；不重新读取磁盘配置。重新初始化 `Scene` 才会读取文件中的新参数。
+- `scene.set_dimensions(...)`：调整 `body_length`、`body_width`、`collector_width`、`collector_depth`、可选的 `body_margin`；非法值、越界或接触剩余点时拒绝整次更新。
+- `controller.set_goal(x, y, yaw)`：下发目标；新指令替换旧指令。非法指令抛出 `ValueError`，旧指令保留。
+- `controller.step(dt)`：推进指定仿真时间；`command is None` 表示无待执行动作，需同时检查 `scene.failure` 判断是否成功到达。
+- `controller.paused = True/False`、`controller.stop()`：暂停 / 继续、取消动作。
+- `scene.turn_to(degrees)`、`scene.forward(metres)`、`scene.advance(rotation=...)` 是底层同步几何动作接口；其中 `turn_to` 使用度，`advance` 的相对旋转使用弧度。常规算法对接优先使用目标位姿接口。
+
+## 必须保持的运动与碰撞规则
+
+1. 小车与目标使用同一 map 坐标系；界面 yaw 使用度，Python 目标位姿 API 使用弧度。0° 向右，90° 向上，逆时针为正。
+2. 目标位置不能处于当前车头后半平面：`(goal_x-x)*cos(yaw) + (goal_y-y)*sin(yaw) >= 0`，正侧方允许。目标与当前位置相同时可以只调整朝向。
+3. 执行顺序为原地转向目标位置 → 向前直线到达 `(x, y)` → 原地调整到最终 yaw。始终禁止倒车，不采用边走边转的模型。
+4. 目标是数学点；绘制的圆点尺寸不代表实体半径。消除区在前进和旋转时都有效，可同时消除多个点。
+5. 碰撞按车身每侧外扩后的矩形判断，未消除点接触内部或边界都不允许。安全轮廓和消除区也不能接触地图边界。
+6. 检查整个运动过程，不能仅检查起点、终点或显示帧。当前使用矩形边界解析接触时刻处理前进和旋转。
+7. 先被消除的点不再触发后续碰撞；同一点同时接触安全轮廓与消除区时，碰撞优先。
+8. 碰撞后冻结在首次接触处，取消位姿指令剩余动作，重置后才能继续。随机场景不保证可解。
+
+## 界面与开发验证
+
+画布左键添加目标点、右键删除附近点，Shift + 左键设置目标位置（最终 yaw 取输入框）。W / 上箭头前进 0.25 米，A / D 或左右箭头原地转 15°，空格暂停，R 重置，Esc 停止。15° 只是快捷操作步长，不限制目标 yaw 的取值。
+
+修改几何、控制或配置逻辑后运行上述单元测试；修改显示后还应导出截图检查中文字体、控件重叠、车身和安全轮廓的一致性。历史宽消除器测试使用 `sim/tests/fixtures/robot.yaml`，不可用它替换用户默认车型。
+
+目标点由 `Scene` 管理并叠加绘制，未放进 IR-SIM 普通障碍物列表；IR-SIM 使用 external step 模式同步位姿。后续接规划器或 Nav2 时需要显式读取剩余点，不假定代价地图已经更新。
+
+保持仿真和算法目录独立，不提交 `.venv/`、缓存、截图或其他 `sim/output/` 生成物。
