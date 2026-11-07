@@ -1,0 +1,25 @@
+world:
+  width: 12
+  height: 9
+  step_time: 0.04
+  sample_time: 0.04
+  control_mode: auto
+  step_mode: external
+  collision_mode: unobstructed
+  plot:
+    figure_pixels: [1320, 850]
+    show_title: false
+gui:
+  keyboard: {backend: mpl}
+robot:
+  # 车身尺寸、消除器和速度统一从 sim/config/robot.yaml 读取。
+  state: [3, 4.5, 0]
+  color: '#2563eb'
+  plot:
+    show_goal: false
+    show_text: false
+    show_arrow: true
+    show_trajectory: false
+custom:
+  seed: 42
+  random_count: 40

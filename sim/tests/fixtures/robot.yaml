@@ -1,0 +1,16 @@
+# Historical wide-collector test fixture, independent of the user's robot.
+version: 1
+units: m
+body:
+  length: 0.8
+  width: 0.6
+  pose_reference: body_center
+  rotation_center: body_center
+collector:
+  width: 0.7
+  depth: 0.7
+safety:
+  body_margin: 0.1
+motion:
+  forward_speed: 0.6
+  angular_speed: 1.2

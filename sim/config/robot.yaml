@@ -1,0 +1,24 @@
+# 车辆配置。长度统一为米，角速度为弧度/秒。
+# 沿车头方向为车体 x 轴，向左为 y 轴。
+version: 1
+units: m
+
+body:
+  length: 0.50
+  width: 0.60
+  # 尚未提供具体安装偏置，暂以车身中心作为位姿参考点和旋转中心。
+  pose_reference: body_center
+  rotation_center: body_center
+
+collector:
+  width: 0.24           # 横向宽度：24 cm
+  depth: 0.35           # 向前深度：35 cm
+  gap: 0.0              # 暂按紧贴车头
+  lateral_offset: 0.0   # 暂按左右居中，正值向车体左侧偏移
+
+safety:
+  body_margin: 0.10     # 车身每一侧外扩 10 cm，接触边界也算碰撞
+
+motion:
+  forward_speed: 0.6    # 仿真动画速度，可自行调整
+  angular_speed: 1.2
