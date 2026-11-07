@@ -4,6 +4,7 @@
 
 - [`sim/`](sim/README.md)：独立的 IR-SIM 场景、交互窗口和几何规则，包含自己的依赖与启动入口。
 - [`sim/config/robot.yaml`](sim/config/robot.yaml)：默认车辆配置，每次初始化自动读取。
+- [目标消除规划与分阶段验证计划](docs/planning-roadmap.md)：从静态完整准确观测开始，逐步验证车头方向加点和随机加点。
 - 后续规划算法单独放置，通过仿真接口读取状态、执行转向和前进动作。
 
 启动场景：
