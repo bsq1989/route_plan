@@ -8,7 +8,7 @@ the displayed animation frames cannot hide a collision or collection.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from copy import copy
+from copy import copy, deepcopy
 from importlib.resources import files
 import math
 import random
@@ -134,6 +134,20 @@ class Scene:
         c, s = math.cos(theta), math.sin(theta)
         dx, dy = x - px, y - py
         return c * dx + s * dy, -s * dx + c * dy
+
+    def clone(self) -> Scene:
+        """Copy an episode for speculative planning, without reloading files.
+
+        Mutable configuration, targets, collected targets and trajectory are
+        independent. Immutable rectangles and tuple poses can safely be shared.
+        This does not construct a viewer or change the original episode.
+        """
+        result = copy(self)
+        result.config = deepcopy(self.config)
+        result.targets = self.targets.copy()
+        result.collected = self.collected.copy()
+        result.path = self.path.copy()
+        return result
 
     def vertices(self, rect: Rect) -> list[tuple[float, float]]:
         px, py, theta = self.pose

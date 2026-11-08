@@ -2,7 +2,7 @@
 
 ## 项目目标与目录
 
-本项目研究前置消除器小车的目标消除顺序与路径规划。当前已有基于 IR-SIM 的二维几何仿真沙盒，支持中文窗口、手动操作和无窗口 Python 调用，尚未接入自动避障规划或 ROS / Nav2。
+本项目研究前置消除器小车的目标消除顺序与路径规划。已有基于 IR-SIM 的二维几何仿真沙盒，以及 `planner/` 静态完整准确观测的自动清除 baseline。当前未接入在线观测更新、ROS / Nav2。
 
 - `sim/`：独立仿真工程，拥有自己的 `pyproject.toml` 和 `uv.lock`。仿真代码、配置、依赖和测试均放在此目录。
 - `sim/config/robot.yaml`：默认车辆配置，每次新建 `Scene` 自动读取。
@@ -13,7 +13,9 @@
 - `sim/src/route_plan_sim/app.py`：IR-SIM 显示适配、中文界面与手动控制。
 - `sim/tests/`：配置、规则、控制器和离屏界面测试。
 - `sim/output/`：导出的 PNG、JSON 和临时构建产物，已被 Git 忽略。
-- 后续任务规划算法单独放置，通过仿真公开接口调用，不将策略代码混入显示层。
+- `planner/`：独立的任务搜索、运动连接器、OMPL 绕行、自动演示及回归测试，包含自己的 `pyproject.toml` 和 `uv.lock`。
+- `docs/static-baseline.md`：静态 baseline 的验证记录与能力边界；`docs/planning-roadmap.md`：分阶段开发计划。
+- 任务规划算法通过仿真公开接口调用，不将策略代码混入显示层。根本目标是全部清除且遵守规则，后续优化目标是总行驶路径最短。
 
 更完整的交互说明见 `sim/README.md`。
 
@@ -38,7 +40,13 @@ uv run --project sim route-sim --snapshot sim/output/scene.png
 
 # 测试
 uv run --project sim python -m unittest discover -s sim/tests -v
+
+# 静态自动清除及规划器测试
+uv run --project planner route-plan solve --scenario random --seed 42 --show
+uv run --project planner python -m unittest discover -s planner/tests -v
 ```
+
+也可使用仓库 `environment.yml` 创建独立 Conda `route-plan` 环境，再从根目录执行 `python -m pip install -e ./sim -e ./planner`。具体命令见 `planner/README.md`。
 
 交互模式需要桌面图形环境和中文字体；离屏导出不打开窗口。`--heading`（度）和 `--distance`（米）可在打开窗口或截图前依次执行一次转向和前进。
 
@@ -85,6 +93,7 @@ print(state["pose"], state["remaining"], state["failure"])
 - `scene.pose`：当前 `(x, y, yaw)`，米、米、弧度。
 - `scene.targets` / `scene.collected`：未消除 / 已消除目标，格式为 `{id: (x, y)}`。
 - `scene.snapshot()`：返回位姿、剩余点、已消除点、失败原因、场景、种子和尺寸。
+- `scene.clone()`：复制当前场景用于独立试算，不读取磁盘配置，不创建窗口；配置、目标、已消除点和轨迹不共享可变状态。
 - `scene.add_target(x, y)`、`scene.remove_nearest(x, y)`：增删点；安全轮廓内及边界上的点禁止添加。
 - `scene.reset()`：恢复当前预设及同一随机种子的初始状态；不重新读取磁盘配置。重新初始化 `Scene` 才会读取文件中的新参数。
 - `scene.set_dimensions(...)`：调整 `body_length`、`body_width`、`collector_width`、`collector_depth`、可选的 `body_margin`；非法值、越界或接触剩余点时拒绝整次更新。

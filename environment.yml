@@ -1,0 +1,8 @@
+name: route-plan
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+# From repository root after activation:
+# python -m pip install -e ./sim -e ./planner

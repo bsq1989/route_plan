@@ -4,11 +4,18 @@
 
 - [`sim/`](sim/README.md)：独立的 IR-SIM 场景、交互窗口和几何规则，包含自己的依赖与启动入口。
 - [`sim/config/robot.yaml`](sim/config/robot.yaml)：默认车辆配置，每次初始化自动读取。
+- [`planner/`](planner/README.md)：静态完整观测的自动清除 baseline，包含任务搜索、OMPL 绕行、自动演示与回放验证。
 - [目标消除规划与分阶段验证计划](docs/planning-roadmap.md)：从静态完整准确观测开始，逐步验证车头方向加点和随机加点。
-- 后续规划算法单独放置，通过仿真接口读取状态、执行转向和前进动作。
+- [第一阶段静态规划 baseline](docs/static-baseline.md)：当前实现范围、验证结果与能力边界。
 
 启动场景：
 
 ```bash
 uv run --project sim route-sim
+```
+
+运行静态自动清除演示：
+
+```bash
+uv run --project planner route-plan solve --scenario random --seed 42 --show
 ```

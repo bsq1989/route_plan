@@ -9,6 +9,22 @@ LEGACY_ROBOT = Path(__file__).parent / "fixtures" / "robot.yaml"
 
 
 class SceneRulesTest(unittest.TestCase):
+    def test_clone_is_an_independent_episode_without_config_reload(self):
+        from unittest.mock import patch
+
+        scene = Scene()
+        before, config = scene.snapshot(), deepcopy(scene.config)
+        with patch("route_plan_sim.scene.load_config", side_effect=AssertionError("must not reload")):
+            trial = scene.clone()
+        trial.forward(.3)
+        trial.targets.pop(next(iter(trial.targets)))
+        trial.collected[999] = (1, 1)
+        trial.config["custom"]["collector"]["width"] = 99
+        self.assertEqual(scene.snapshot(), before)
+        self.assertEqual(scene.config, config)
+        self.assertNotEqual(trial.pose, scene.pose)
+        self.assertNotEqual(trial.path, scene.path)
+
     def empty(self):
         scene = Scene(body_margin=0, robot_config=LEGACY_ROBOT)
         scene.targets.clear()

@@ -1,0 +1,1340 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "empty",
+      "options": {
+        "timeout": 3,
+        "max_expansions": 2000,
+        "max_trials": 30000,
+        "headings": 24,
+        "relocation_steps": [
+          0.4,
+          0.8,
+          1.4
+        ],
+        "max_relocations": 3,
+        "ompl": false,
+        "ompl_seconds": 0.4,
+        "ompl_attempts": 4,
+        "seed": 42
+      },
+      "initial": {
+        "world_config": {
+          "world": {
+            "width": 12,
+            "height": 9,
+            "step_time": 0.04,
+            "sample_time": 0.04,
+            "control_mode": "auto",
+            "step_mode": "external",
+            "collision_mode": "unobstructed",
+            "plot": {
+              "figure_pixels": [
+                1320,
+                850
+              ],
+              "show_title": false
+            }
+          },
+          "gui": {
+            "keyboard": {
+              "backend": "mpl"
+            }
+          },
+          "robot": {
+            "state": [
+              3,
+              4.5,
+              0
+            ],
+            "color": "#2563eb",
+            "plot": {
+              "show_goal": false,
+              "show_text": false,
+              "show_arrow": true,
+              "show_trajectory": false
+            },
+            "kinematics": {
+              "name": "diff"
+            },
+            "shape": {
+              "name": "rectangle",
+              "length": 0.5,
+              "width": 0.6
+            }
+          },
+          "custom": {
+            "seed": 42,
+            "random_count": 40,
+            "collector": {
+              "width": 0.24,
+              "depth": 0.35,
+              "gap": 0.0,
+              "lateral_offset": 0.0
+            },
+            "body_margin": 0.1,
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "vehicle_config": {
+          "version": 1,
+          "units": "m",
+          "body": {
+            "length": 0.5,
+            "width": 0.6,
+            "pose_reference": "body_center",
+            "rotation_center": "body_center"
+          },
+          "collector": {
+            "width": 0.24,
+            "depth": 0.35,
+            "gap": 0.0,
+            "lateral_offset": 0.0
+          },
+          "safety": {
+            "body_margin": 0.1
+          },
+          "motion": {
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "state": {
+          "pose": [
+            3.0,
+            4.5,
+            0.0
+          ],
+          "remaining": {},
+          "collected": {},
+          "failure": null,
+          "scenario": "front",
+          "seed": 42,
+          "dimensions": {
+            "body_length": 0.5,
+            "body_width": 0.6,
+            "collector_width": 0.24,
+            "collector_depth": 0.35,
+            "body_margin": 0.1
+          }
+        }
+      },
+      "witness": []
+    },
+    {
+      "name": "single_front",
+      "options": {
+        "timeout": 3,
+        "max_expansions": 2000,
+        "max_trials": 30000,
+        "headings": 24,
+        "relocation_steps": [
+          0.4,
+          0.8,
+          1.4
+        ],
+        "max_relocations": 3,
+        "ompl": false,
+        "ompl_seconds": 0.4,
+        "ompl_attempts": 4,
+        "seed": 42
+      },
+      "initial": {
+        "world_config": {
+          "world": {
+            "width": 12,
+            "height": 9,
+            "step_time": 0.04,
+            "sample_time": 0.04,
+            "control_mode": "auto",
+            "step_mode": "external",
+            "collision_mode": "unobstructed",
+            "plot": {
+              "figure_pixels": [
+                1320,
+                850
+              ],
+              "show_title": false
+            }
+          },
+          "gui": {
+            "keyboard": {
+              "backend": "mpl"
+            }
+          },
+          "robot": {
+            "state": [
+              3,
+              4.5,
+              0
+            ],
+            "color": "#2563eb",
+            "plot": {
+              "show_goal": false,
+              "show_text": false,
+              "show_arrow": true,
+              "show_trajectory": false
+            },
+            "kinematics": {
+              "name": "diff"
+            },
+            "shape": {
+              "name": "rectangle",
+              "length": 0.5,
+              "width": 0.6
+            }
+          },
+          "custom": {
+            "seed": 42,
+            "random_count": 40,
+            "collector": {
+              "width": 0.24,
+              "depth": 0.35,
+              "gap": 0.0,
+              "lateral_offset": 0.0
+            },
+            "body_margin": 0.1,
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "vehicle_config": {
+          "version": 1,
+          "units": "m",
+          "body": {
+            "length": 0.5,
+            "width": 0.6,
+            "pose_reference": "body_center",
+            "rotation_center": "body_center"
+          },
+          "collector": {
+            "width": 0.24,
+            "depth": 0.35,
+            "gap": 0.0,
+            "lateral_offset": 0.0
+          },
+          "safety": {
+            "body_margin": 0.1
+          },
+          "motion": {
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "state": {
+          "pose": [
+            3.0,
+            4.5,
+            0.0
+          ],
+          "remaining": {
+            "11": [
+              5.0,
+              4.5
+            ]
+          },
+          "collected": {},
+          "failure": null,
+          "scenario": "front",
+          "seed": 42,
+          "dimensions": {
+            "body_length": 0.5,
+            "body_width": 0.6,
+            "collector_width": 0.24,
+            "collector_depth": 0.35,
+            "body_margin": 0.1
+          }
+        }
+      },
+      "witness": [
+        [
+          4.415,
+          4.5,
+          0.0
+        ]
+      ]
+    },
+    {
+      "name": "single_side",
+      "options": {
+        "timeout": 3,
+        "max_expansions": 2000,
+        "max_trials": 30000,
+        "headings": 24,
+        "relocation_steps": [
+          0.4,
+          0.8,
+          1.4
+        ],
+        "max_relocations": 3,
+        "ompl": false,
+        "ompl_seconds": 0.4,
+        "ompl_attempts": 4,
+        "seed": 42
+      },
+      "initial": {
+        "world_config": {
+          "world": {
+            "width": 12,
+            "height": 9,
+            "step_time": 0.04,
+            "sample_time": 0.04,
+            "control_mode": "auto",
+            "step_mode": "external",
+            "collision_mode": "unobstructed",
+            "plot": {
+              "figure_pixels": [
+                1320,
+                850
+              ],
+              "show_title": false
+            }
+          },
+          "gui": {
+            "keyboard": {
+              "backend": "mpl"
+            }
+          },
+          "robot": {
+            "state": [
+              3,
+              4.5,
+              0
+            ],
+            "color": "#2563eb",
+            "plot": {
+              "show_goal": false,
+              "show_text": false,
+              "show_arrow": true,
+              "show_trajectory": false
+            },
+            "kinematics": {
+              "name": "diff"
+            },
+            "shape": {
+              "name": "rectangle",
+              "length": 0.5,
+              "width": 0.6
+            }
+          },
+          "custom": {
+            "seed": 42,
+            "random_count": 40,
+            "collector": {
+              "width": 0.24,
+              "depth": 0.35,
+              "gap": 0.0,
+              "lateral_offset": 0.0
+            },
+            "body_margin": 0.1,
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "vehicle_config": {
+          "version": 1,
+          "units": "m",
+          "body": {
+            "length": 0.5,
+            "width": 0.6,
+            "pose_reference": "body_center",
+            "rotation_center": "body_center"
+          },
+          "collector": {
+            "width": 0.24,
+            "depth": 0.35,
+            "gap": 0.0,
+            "lateral_offset": 0.0
+          },
+          "safety": {
+            "body_margin": 0.1
+          },
+          "motion": {
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "state": {
+          "pose": [
+            3.0,
+            4.5,
+            0.0
+          ],
+          "remaining": {
+            "11": [
+              3.0,
+              6.5
+            ]
+          },
+          "collected": {},
+          "failure": null,
+          "scenario": "front",
+          "seed": 42,
+          "dimensions": {
+            "body_length": 0.5,
+            "body_width": 0.6,
+            "collector_width": 0.24,
+            "collector_depth": 0.35,
+            "body_margin": 0.1
+          }
+        }
+      },
+      "witness": [
+        [
+          3.0,
+          4.5,
+          0.8379619096333704
+        ],
+        [
+          3.0,
+          4.5,
+          1.6759238192667407
+        ],
+        [
+          2.8485908586150255,
+          5.934933391620895,
+          1.6759238192667412
+        ],
+        [
+          2.848590858615026,
+          5.934933391620895,
+          1.3089969389957474
+        ]
+      ]
+    },
+    {
+      "name": "single_rear",
+      "options": {
+        "timeout": 3,
+        "max_expansions": 2000,
+        "max_trials": 30000,
+        "headings": 24,
+        "relocation_steps": [
+          0.4,
+          0.8,
+          1.4
+        ],
+        "max_relocations": 3,
+        "ompl": false,
+        "ompl_seconds": 0.4,
+        "ompl_attempts": 4,
+        "seed": 42
+      },
+      "initial": {
+        "world_config": {
+          "world": {
+            "width": 12,
+            "height": 9,
+            "step_time": 0.04,
+            "sample_time": 0.04,
+            "control_mode": "auto",
+            "step_mode": "external",
+            "collision_mode": "unobstructed",
+            "plot": {
+              "figure_pixels": [
+                1320,
+                850
+              ],
+              "show_title": false
+            }
+          },
+          "gui": {
+            "keyboard": {
+              "backend": "mpl"
+            }
+          },
+          "robot": {
+            "state": [
+              3,
+              4.5,
+              0
+            ],
+            "color": "#2563eb",
+            "plot": {
+              "show_goal": false,
+              "show_text": false,
+              "show_arrow": true,
+              "show_trajectory": false
+            },
+            "kinematics": {
+              "name": "diff"
+            },
+            "shape": {
+              "name": "rectangle",
+              "length": 0.5,
+              "width": 0.6
+            }
+          },
+          "custom": {
+            "seed": 42,
+            "random_count": 40,
+            "collector": {
+              "width": 0.24,
+              "depth": 0.35,
+              "gap": 0.0,
+              "lateral_offset": 0.0
+            },
+            "body_margin": 0.1,
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "vehicle_config": {
+          "version": 1,
+          "units": "m",
+          "body": {
+            "length": 0.5,
+            "width": 0.6,
+            "pose_reference": "body_center",
+            "rotation_center": "body_center"
+          },
+          "collector": {
+            "width": 0.24,
+            "depth": 0.35,
+            "gap": 0.0,
+            "lateral_offset": 0.0
+          },
+          "safety": {
+            "body_margin": 0.1
+          },
+          "motion": {
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "state": {
+          "pose": [
+            3.0,
+            4.5,
+            0.0
+          ],
+          "remaining": {
+            "11": [
+              1.2,
+              4.5
+            ]
+          },
+          "collected": {},
+          "failure": null,
+          "scenario": "front",
+          "seed": 42,
+          "dimensions": {
+            "body_length": 0.5,
+            "body_width": 0.6,
+            "collector_width": 0.24,
+            "collector_depth": 0.35,
+            "body_margin": 0.1
+          }
+        }
+      },
+      "witness": [
+        [
+          3.0,
+          4.5,
+          1.5097981989013602
+        ],
+        [
+          3.0,
+          4.5,
+          3.0195963978027205
+        ],
+        [
+          1.765066608379105,
+          4.651409141384975,
+          3.0195963978027205
+        ],
+        [
+          1.765066608379105,
+          4.651409141384975,
+          -2.879793265790644
+        ]
+      ]
+    },
+    {
+      "name": "collinear_group",
+      "options": {
+        "timeout": 3,
+        "max_expansions": 2000,
+        "max_trials": 30000,
+        "headings": 24,
+        "relocation_steps": [
+          0.4,
+          0.8,
+          1.4
+        ],
+        "max_relocations": 3,
+        "ompl": false,
+        "ompl_seconds": 0.4,
+        "ompl_attempts": 4,
+        "seed": 42
+      },
+      "initial": {
+        "world_config": {
+          "world": {
+            "width": 12,
+            "height": 9,
+            "step_time": 0.04,
+            "sample_time": 0.04,
+            "control_mode": "auto",
+            "step_mode": "external",
+            "collision_mode": "unobstructed",
+            "plot": {
+              "figure_pixels": [
+                1320,
+                850
+              ],
+              "show_title": false
+            }
+          },
+          "gui": {
+            "keyboard": {
+              "backend": "mpl"
+            }
+          },
+          "robot": {
+            "state": [
+              3,
+              4.5,
+              0
+            ],
+            "color": "#2563eb",
+            "plot": {
+              "show_goal": false,
+              "show_text": false,
+              "show_arrow": true,
+              "show_trajectory": false
+            },
+            "kinematics": {
+              "name": "diff"
+            },
+            "shape": {
+              "name": "rectangle",
+              "length": 0.5,
+              "width": 0.6
+            }
+          },
+          "custom": {
+            "seed": 42,
+            "random_count": 40,
+            "collector": {
+              "width": 0.24,
+              "depth": 0.35,
+              "gap": 0.0,
+              "lateral_offset": 0.0
+            },
+            "body_margin": 0.1,
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "vehicle_config": {
+          "version": 1,
+          "units": "m",
+          "body": {
+            "length": 0.5,
+            "width": 0.6,
+            "pose_reference": "body_center",
+            "rotation_center": "body_center"
+          },
+          "collector": {
+            "width": 0.24,
+            "depth": 0.35,
+            "gap": 0.0,
+            "lateral_offset": 0.0
+          },
+          "safety": {
+            "body_margin": 0.1
+          },
+          "motion": {
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "state": {
+          "pose": [
+            3.0,
+            4.5,
+            0.0
+          ],
+          "remaining": {
+            "11": [
+              5.0,
+              4.5
+            ],
+            "12": [
+              5.1,
+              4.5
+            ],
+            "13": [
+              5.2,
+              4.5
+            ]
+          },
+          "collected": {},
+          "failure": null,
+          "scenario": "front",
+          "seed": 42,
+          "dimensions": {
+            "body_length": 0.5,
+            "body_width": 0.6,
+            "collector_width": 0.24,
+            "collector_depth": 0.35,
+            "body_margin": 0.1
+          }
+        }
+      },
+      "witness": [
+        [
+          4.415,
+          4.5,
+          0.0
+        ],
+        [
+          4.515,
+          4.5,
+          0.0
+        ],
+        [
+          4.615,
+          4.5,
+          0.0
+        ]
+      ]
+    },
+    {
+      "name": "blocked_approach",
+      "options": {
+        "timeout": 3,
+        "max_expansions": 2000,
+        "max_trials": 30000,
+        "headings": 24,
+        "relocation_steps": [
+          0.4,
+          0.8,
+          1.4
+        ],
+        "max_relocations": 3,
+        "ompl": false,
+        "ompl_seconds": 0.4,
+        "ompl_attempts": 4,
+        "seed": 42
+      },
+      "initial": {
+        "world_config": {
+          "world": {
+            "width": 12,
+            "height": 9,
+            "step_time": 0.04,
+            "sample_time": 0.04,
+            "control_mode": "auto",
+            "step_mode": "external",
+            "collision_mode": "unobstructed",
+            "plot": {
+              "figure_pixels": [
+                1320,
+                850
+              ],
+              "show_title": false
+            }
+          },
+          "gui": {
+            "keyboard": {
+              "backend": "mpl"
+            }
+          },
+          "robot": {
+            "state": [
+              3,
+              4.5,
+              0
+            ],
+            "color": "#2563eb",
+            "plot": {
+              "show_goal": false,
+              "show_text": false,
+              "show_arrow": true,
+              "show_trajectory": false
+            },
+            "kinematics": {
+              "name": "diff"
+            },
+            "shape": {
+              "name": "rectangle",
+              "length": 0.5,
+              "width": 0.6
+            }
+          },
+          "custom": {
+            "seed": 42,
+            "random_count": 40,
+            "collector": {
+              "width": 0.24,
+              "depth": 0.35,
+              "gap": 0.0,
+              "lateral_offset": 0.0
+            },
+            "body_margin": 0.1,
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "vehicle_config": {
+          "version": 1,
+          "units": "m",
+          "body": {
+            "length": 0.5,
+            "width": 0.6,
+            "pose_reference": "body_center",
+            "rotation_center": "body_center"
+          },
+          "collector": {
+            "width": 0.24,
+            "depth": 0.35,
+            "gap": 0.0,
+            "lateral_offset": 0.0
+          },
+          "safety": {
+            "body_margin": 0.1
+          },
+          "motion": {
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "state": {
+          "pose": [
+            3.0,
+            4.5,
+            0.0
+          ],
+          "remaining": {
+            "11": [
+              4.5,
+              4.8
+            ],
+            "12": [
+              6.5,
+              4.5
+            ]
+          },
+          "collected": {},
+          "failure": null,
+          "scenario": "front",
+          "seed": 42,
+          "dimensions": {
+            "body_length": 0.5,
+            "body_width": 0.6,
+            "collector_width": 0.24,
+            "collector_depth": 0.35,
+            "body_margin": 0.1
+          }
+        }
+      },
+      "witness": [
+        [
+          3.0,
+          4.5,
+          0.316824485868219
+        ],
+        [
+          3.915,
+          4.8,
+          0.31682448586821904
+        ],
+        [
+          3.915,
+          4.8,
+          0.0
+        ],
+        [
+          3.915,
+          4.8,
+          -0.14888994760949714
+        ],
+        [
+          5.915,
+          4.5,
+          -0.14888994760949717
+        ],
+        [
+          5.915,
+          4.5,
+          0.0
+        ]
+      ]
+    },
+    {
+      "name": "tight_cluster",
+      "options": {
+        "timeout": 3,
+        "max_expansions": 2000,
+        "max_trials": 30000,
+        "headings": 24,
+        "relocation_steps": [
+          0.4,
+          0.8,
+          1.4
+        ],
+        "max_relocations": 3,
+        "ompl": false,
+        "ompl_seconds": 0.4,
+        "ompl_attempts": 4,
+        "seed": 42
+      },
+      "initial": {
+        "world_config": {
+          "world": {
+            "width": 12,
+            "height": 9,
+            "step_time": 0.04,
+            "sample_time": 0.04,
+            "control_mode": "auto",
+            "step_mode": "external",
+            "collision_mode": "unobstructed",
+            "plot": {
+              "figure_pixels": [
+                1320,
+                850
+              ],
+              "show_title": false
+            }
+          },
+          "gui": {
+            "keyboard": {
+              "backend": "mpl"
+            }
+          },
+          "robot": {
+            "state": [
+              3,
+              4.5,
+              0
+            ],
+            "color": "#2563eb",
+            "plot": {
+              "show_goal": false,
+              "show_text": false,
+              "show_arrow": true,
+              "show_trajectory": false
+            },
+            "kinematics": {
+              "name": "diff"
+            },
+            "shape": {
+              "name": "rectangle",
+              "length": 0.5,
+              "width": 0.6
+            }
+          },
+          "custom": {
+            "seed": 42,
+            "random_count": 40,
+            "collector": {
+              "width": 0.24,
+              "depth": 0.35,
+              "gap": 0.0,
+              "lateral_offset": 0.0
+            },
+            "body_margin": 0.1,
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "vehicle_config": {
+          "version": 1,
+          "units": "m",
+          "body": {
+            "length": 0.5,
+            "width": 0.6,
+            "pose_reference": "body_center",
+            "rotation_center": "body_center"
+          },
+          "collector": {
+            "width": 0.24,
+            "depth": 0.35,
+            "gap": 0.0,
+            "lateral_offset": 0.0
+          },
+          "safety": {
+            "body_margin": 0.1
+          },
+          "motion": {
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "state": {
+          "pose": [
+            3.0,
+            4.5,
+            0.0
+          ],
+          "remaining": {
+            "11": [
+              6.0,
+              4.5
+            ],
+            "12": [
+              6.0,
+              4.75
+            ],
+            "13": [
+              6.2,
+              4.6
+            ]
+          },
+          "collected": {},
+          "failure": null,
+          "scenario": "front",
+          "seed": 42,
+          "dimensions": {
+            "body_length": 0.5,
+            "body_width": 0.6,
+            "collector_width": 0.24,
+            "collector_depth": 0.35,
+            "body_margin": 0.1
+          }
+        }
+      },
+      "witness": [
+        [
+          5.415,
+          4.5,
+          0.0
+        ],
+        [
+          5.415,
+          4.5,
+          0.40385979490738233
+        ],
+        [
+          5.462062628836464,
+          4.520112234545498,
+          0.4038597949073822
+        ],
+        [
+          5.462062628836464,
+          4.520112234545498,
+          0.10783821831316143
+        ],
+        [
+          5.618398211200139,
+          4.537036842004217,
+          0.10783821831316129
+        ]
+      ]
+    },
+    {
+      "name": "backtrack_corner_last",
+      "options": {
+        "timeout": 3,
+        "max_expansions": 2000,
+        "max_trials": 30000,
+        "headings": 24,
+        "relocation_steps": [
+          0.4,
+          0.8,
+          1.4
+        ],
+        "max_relocations": 0,
+        "ompl": false,
+        "ompl_seconds": 0.4,
+        "ompl_attempts": 4,
+        "seed": 42
+      },
+      "initial": {
+        "world_config": {
+          "world": {
+            "width": 12,
+            "height": 9,
+            "step_time": 0.04,
+            "sample_time": 0.04,
+            "control_mode": "auto",
+            "step_mode": "external",
+            "collision_mode": "unobstructed",
+            "plot": {
+              "figure_pixels": [
+                1320,
+                850
+              ],
+              "show_title": false
+            }
+          },
+          "gui": {
+            "keyboard": {
+              "backend": "mpl"
+            }
+          },
+          "robot": {
+            "state": [
+              3,
+              4.5,
+              0
+            ],
+            "color": "#2563eb",
+            "plot": {
+              "show_goal": false,
+              "show_text": false,
+              "show_arrow": true,
+              "show_trajectory": false
+            },
+            "kinematics": {
+              "name": "diff"
+            },
+            "shape": {
+              "name": "rectangle",
+              "length": 0.5,
+              "width": 0.6
+            }
+          },
+          "custom": {
+            "seed": 42,
+            "random_count": 40,
+            "collector": {
+              "width": 0.24,
+              "depth": 0.35,
+              "gap": 0.0,
+              "lateral_offset": 0.0
+            },
+            "body_margin": 0.1,
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "vehicle_config": {
+          "version": 1,
+          "units": "m",
+          "body": {
+            "length": 0.5,
+            "width": 0.6,
+            "pose_reference": "body_center",
+            "rotation_center": "body_center"
+          },
+          "collector": {
+            "width": 0.24,
+            "depth": 0.35,
+            "gap": 0.0,
+            "lateral_offset": 0.0
+          },
+          "safety": {
+            "body_margin": 0.1
+          },
+          "motion": {
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "state": {
+          "pose": [
+            3.0,
+            4.5,
+            0.0
+          ],
+          "remaining": {
+            "11": [
+              0.15,
+              0.15
+            ],
+            "12": [
+              10.0,
+              7.8
+            ]
+          },
+          "collected": {},
+          "failure": null,
+          "scenario": "front",
+          "seed": 42,
+          "dimensions": {
+            "body_length": 0.5,
+            "body_width": 0.6,
+            "collector_width": 0.24,
+            "collector_depth": 0.35,
+            "body_margin": 0.1
+          }
+        }
+      },
+      "witness": [
+        [
+          3.0,
+          4.5,
+          0.4550482618019993
+        ],
+        [
+          9.434933391620895,
+          7.648590858615025,
+          0.4550482618019993
+        ],
+        [
+          9.434933391620895,
+          7.648590858615025,
+          0.2617993877991496
+        ],
+        [
+          9.434933391620895,
+          7.648590858615025,
+          -1.1029418423737933
+        ],
+        [
+          9.434933391620895,
+          7.648590858615025,
+          -2.467683072546736
+        ],
+        [
+          0.5636574669941304,
+          0.56365746699413,
+          -2.467683072546736
+        ],
+        [
+          0.5636574669941297,
+          0.5636574669941297,
+          -2.3561944901923457
+        ]
+      ]
+    },
+    {
+      "name": "corner_staging",
+      "options": {
+        "timeout": 3,
+        "max_expansions": 2000,
+        "max_trials": 30000,
+        "headings": 24,
+        "relocation_steps": [
+          0.4,
+          0.8,
+          1.4
+        ],
+        "max_relocations": 3,
+        "ompl": false,
+        "ompl_seconds": 0.4,
+        "ompl_attempts": 4,
+        "seed": 42
+      },
+      "initial": {
+        "world_config": {
+          "world": {
+            "width": 12,
+            "height": 9,
+            "step_time": 0.04,
+            "sample_time": 0.04,
+            "control_mode": "auto",
+            "step_mode": "external",
+            "collision_mode": "unobstructed",
+            "plot": {
+              "figure_pixels": [
+                1320,
+                850
+              ],
+              "show_title": false
+            }
+          },
+          "gui": {
+            "keyboard": {
+              "backend": "mpl"
+            }
+          },
+          "robot": {
+            "state": [
+              3,
+              4.5,
+              0
+            ],
+            "color": "#2563eb",
+            "plot": {
+              "show_goal": false,
+              "show_text": false,
+              "show_arrow": true,
+              "show_trajectory": false
+            },
+            "kinematics": {
+              "name": "diff"
+            },
+            "shape": {
+              "name": "rectangle",
+              "length": 0.5,
+              "width": 0.6
+            }
+          },
+          "custom": {
+            "seed": 42,
+            "random_count": 40,
+            "collector": {
+              "width": 0.24,
+              "depth": 0.35,
+              "gap": 0.0,
+              "lateral_offset": 0.0
+            },
+            "body_margin": 0.1,
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "vehicle_config": {
+          "version": 1,
+          "units": "m",
+          "body": {
+            "length": 0.5,
+            "width": 0.6,
+            "pose_reference": "body_center",
+            "rotation_center": "body_center"
+          },
+          "collector": {
+            "width": 0.24,
+            "depth": 0.35,
+            "gap": 0.0,
+            "lateral_offset": 0.0
+          },
+          "safety": {
+            "body_margin": 0.1
+          },
+          "motion": {
+            "forward_speed": 0.6,
+            "angular_speed": 1.2
+          }
+        },
+        "state": {
+          "pose": [
+            3.0,
+            4.5,
+            0.0
+          ],
+          "remaining": {
+            "11": [
+              11.796678194564427,
+              0.1520093931762829
+            ]
+          },
+          "collected": {},
+          "failure": null,
+          "scenario": "front",
+          "seed": 42,
+          "dimensions": {
+            "body_length": 0.5,
+            "body_width": 0.6,
+            "collector_width": 0.24,
+            "collector_depth": 0.35,
+            "body_margin": 0.1
+          }
+        }
+      },
+      "witness": [
+        [
+          3.0,
+          4.5,
+          -0.43880512945421124
+        ],
+        [
+          11.383020727570297,
+          0.5656668601704132,
+          -0.4388051294542112
+        ],
+        [
+          11.383020727570297,
+          0.5656668601704133,
+          -0.7853981633974492
+        ]
+      ]
+    }
+  ]
+}
