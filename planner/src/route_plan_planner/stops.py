@@ -16,11 +16,22 @@ def at_stop_scene(scene: Scene) -> Scene:
     result = scene.clone()
     result.collection_mode = "at_stop"
     result.config["custom"]["collection_mode"] = "at_stop"
+    result.pickup_rule = "center"
+    result.config["custom"]["pickup_rule"] = "center"
+    return result
+
+
+def center_contact_scene(scene: Scene) -> Scene:
+    """Feasibility seed with centre-entry events, preserving disk collisions."""
+    result = at_stop_scene(scene)
+    result.collection_mode = "contact"
+    result.config["custom"]["collection_mode"] = "contact"
+    result._collect_at_pose()
     return result
 
 
 def materialize_stops(scene: Scene, initial: PlanResult) -> PlanResult:
-    """Split a contact-plan at exact analytic contact poses, never at frames.
+    """Split a centre-entry plan at exact analytic entry poses, never at frames.
 
     This supplies a feasible incumbent under explicit pickup semantics. Every
     individual contact becomes a real stop unless several disks are covered
@@ -29,10 +40,7 @@ def materialize_stops(scene: Scene, initial: PlanResult) -> PlanResult:
     if initial.status != "success":
         return deepcopy(initial)
     trial = at_stop_scene(scene)
-    contact = scene.clone()
-    contact.collection_mode = "contact"
-    contact.config["custom"]["collection_mode"] = "contact"
-    contact._collect_at_pose()
+    contact = center_contact_scene(scene)
     goals, stops = [], []
 
     def append_goal():
@@ -45,7 +53,7 @@ def materialize_stops(scene: Scene, initial: PlanResult) -> PlanResult:
         removed = trial.collect_at_stop()
         if removed:
             index = append_goal()
-            stops.append({"goal_index": index, "pose": tuple(trial.pose), "target_ids": list(removed)})
+            stops.append({"goal_index": index, "pose": tuple(goals[index]), "target_ids": list(removed)})
 
     if set(contact.collected) - set(trial.collected):
         pickup()
@@ -104,14 +112,13 @@ class StopsPlanner:
     def _pool(self, scene, deadline, incumbent):
         points = list(scene.targets.values())
         anchors = set(points)
-        diameter = math.hypot(scene.dimensions["collector_depth"] + 2 * scene.target_radius,
-                              scene.dimensions["collector_width"] + 2 * scene.target_radius)
+        diameter = math.hypot(scene.dimensions["collector_depth"], scene.dimensions["collector_width"])
         for i, point in enumerate(points):
             for other in points[:i]:
                 if math.dist(point, other) <= diameter:
                     anchors.add(((point[0] + other[0]) / 2, (point[1] + other[1]) / 2))
         near = max(scene.collector.xmin, scene.safety_body.xmax + scene.target_radius) + .015
-        far = scene.collector.xmax + scene.target_radius - .015
+        far = scene.collector.xmax - .015
         depths = sorted({far, (near + far) / 2, near})
         offset = (scene.collector.ymin + scene.collector.ymax) / 2
         poses = {tuple(stop["pose"]) for stop in incumbent.pickup_stops}
@@ -123,7 +130,6 @@ class StopsPlanner:
                 c, s = math.cos(angle), math.sin(angle)
                 for depth in depths:
                     poses.add((tx - c * depth + s * offset, ty - s * depth - c * offset, normalize(angle)))
-        groups = {key: group for group in scene.target_groups for key in group}
         candidates = []
         for pose in sorted(poses):
             if time.monotonic() >= deadline:
@@ -139,8 +145,8 @@ class StopsPlanner:
             covered, blocked = set(), set()
             for key, (tx, ty) in scene.targets.items():
                 u, v = c * (tx - x) + s * (ty - y), -s * (tx - x) + c * (ty - y)
-                if scene.collector.intersects_circle(u, v, scene.target_radius):
-                    covered.update(groups[key])
+                if scene.collector.contains(u, v):
+                    covered.add(key)
                 if scene.safety_body.intersects_circle(u, v, scene.target_radius):
                     blocked.add(key)
             if covered:
@@ -153,10 +159,7 @@ class StopsPlanner:
         deadline = started + max(0., self.options.timeout - shared_elapsed)
         root = at_stop_scene(scene)
         if initial is None:
-            contact = scene.clone()
-            contact.collection_mode = "contact"
-            contact.config["custom"]["collection_mode"] = "contact"
-            contact._collect_at_pose()
+            contact = center_contact_scene(scene)
             initial = StaticPlanner(self.options).plan(contact)
         if initial.status != "success":
             return deepcopy(initial)
@@ -166,6 +169,7 @@ class StopsPlanner:
             return PlanResult("replay_failed", reason=str(error), remaining=len(root.targets))
         baseline_count, baseline_length = len(best.pickup_stops), best.length
         stats = {"method": "stop-cover-beam-v1", "objective": ["pickup_stop_count", "translation_length_m"],
+                 "pickup_rule": "center",
                  "baseline_stop_count": baseline_count, "baseline_length": baseline_length,
                  "stop_count": baseline_count, "improvements": 0, "global_optimal": False,
                  "candidate_count": 0, "trials": 0, "expanded": 0, "termination": "candidates_exhausted"}
@@ -223,7 +227,7 @@ class StopsPlanner:
                     if not segment:
                         segment = [tuple(child.pose)]
                     child_goals = goals + segment
-                    child_stops = stops + [{"goal_index": len(child_goals) - 1, "pose": tuple(child.pose),
+                    child_stops = stops + [{"goal_index": len(child_goals) - 1, "pose": tuple(child_goals[-1]),
                                             "target_ids": list(removed)}]
                     child_cost = cost + path_length(current.pose, segment)
                     if not child.targets:

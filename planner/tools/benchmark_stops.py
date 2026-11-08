@@ -10,7 +10,7 @@ from route_plan_sim import Scene
 from route_plan_planner import LengthPlanner, PlannerOptions, StopsPlanner
 from route_plan_planner.motion import replay
 from route_plan_planner.records import describe_scene, restore_scene, write_json
-from route_plan_planner.stops import at_stop_scene, materialize_stops
+from route_plan_planner.stops import at_stop_scene, center_contact_scene, materialize_stops
 
 SEEDS = (41, 57, 28, 38, 49, 70, 1, 97, 85, 54)
 
@@ -38,15 +38,23 @@ def benchmark(output, render=False):
     cases = [(f"random-{seed}", Scene(scenario="random", seed=seed)) for seed in SEEDS]
     cases += [(f"cluster-{seed}", clustered(seed)) for seed in range(10)]
     for name, contact in cases:
-        seed = LengthPlanner(PlannerOptions(timeout=1., ompl=True)).plan(contact)
+        seed = LengthPlanner(PlannerOptions(timeout=3., ompl=True)).plan(center_contact_scene(contact))
         if seed.status != "success":
             raise ValueError(f"Length seed failed: {name}: {seed.reason}")
         scene = at_stop_scene(contact)
         a = materialize_stops(scene, seed)
-        b = StopsPlanner(PlannerOptions(timeout=3., ompl=True)).plan(scene, initial=seed)
+        b = StopsPlanner(PlannerOptions(timeout=6., ompl=True)).plan(scene, initial=seed)
         if b.status != "success":
             raise ValueError(f"Stop search failed: {name}: {b.reason}")
         for result in (a, b):
+            for stop in result.pickup_stops:
+                x, y, yaw = stop["pose"]
+                c, s = math.cos(yaw), math.sin(yaw)
+                for key in stop["target_ids"]:
+                    tx, ty = scene.targets[key]
+                    u, v = c * (tx - x) + s * (ty - y), -s * (tx - x) + c * (ty - y)
+                    assert scene.collector.xmin - 1e-8 <= u <= scene.collector.xmax + 1e-8
+                    assert scene.collector.ymin - 1e-8 <= v <= scene.collector.ymax + 1e-8
             for dt in (.013, .7):
                 final = replay(scene, result.goals, dt=dt, pickup_stops=result.pickup_stops)
                 if final.failure or final.targets or set(final.collected) != set(scene.targets):
@@ -62,10 +70,10 @@ def benchmark(output, render=False):
         rows.append(row)
         print(f"{name}: stops {row['a_stops']} -> {row['b_stops']}; "
               f"length {a.length:.2f} -> {b.length:.2f}m; two replay rates passed", flush=True)
-    summary = dict(schema_version=1, sdk_version="0.2.0", rule_version=2, collection_mode="at_stop",
-                   a="length mode; exact contacts materialized as individual pickup stops",
+    summary = dict(schema_version=1, sdk_version="0.2.1", rule_version=2, collection_mode="at_stop", pickup_rule="center",
+                   a="length-priority baseline under the same center-entry pickup rule; exact entry events become stops",
                    b="stops mode; same verified A seed; stop count first, length second",
-                   budget="A: 1s; B: 3s total including A elapsed; independent replay may add time",
+                   budget="A: 3s; B: 6s total including A elapsed; independent replay may add time",
                    replay_dt=[.013, .7], total=len(rows), success=len(rows), targets=sum(row["targets"] for row in rows),
                    a_stops=sum(row["a_stops"] for row in rows), b_stops=sum(row["b_stops"] for row in rows),
                    a_length=sum(row["a_length"] for row in rows), b_length=sum(row["b_length"] for row in rows),
@@ -95,15 +103,15 @@ def render_results(output, summary):
     for ax, a_key, b_key, title in ((axes[0], "a_stops", "b_stops", "拾取停靠次数（首要优化目标）"),
                                   (axes[1], "a_length", "b_length", "行驶距离 / m（停靠次数相同时继续优化）")):
         positions = list(range(len(rows)))
-        ax.bar([i - .2 for i in positions], [row[a_key] for row in rows], width=.4, color="#6086b9", label="A 原长度模式")
+        ax.bar([i - .2 for i in positions], [row[a_key] for row in rows], width=.4, color="#6086b9", label="A 长度优先（圆心覆盖）")
         ax.bar([i + .2 for i in positions], [row[b_key] for row in rows], width=.4, color="#24a582", label="B 停靠优化")
         ax.set_xticks(positions, [row["case"].replace("random-", "R").replace("cluster-", "C") for row in rows], rotation=45)
         ax.set_title(title, fontsize=12)
         ax.axvline(9.5, color="#939ba8", linestyle="--", alpha=.5)
         ax.grid(axis="y", alpha=.15)
         ax.legend(fontsize=9)
-    fig.suptitle(f"停靠优化 A/B · 20/20 场景全部清除且无碰撞 · 停靠减少 {summary['saved_stop_fraction']:.1%}", fontsize=15)
-    fig.text(.5, .02, "R：随机分布，C：10 簇 × 4 个非重叠目标。B 复用 A 初解并继续搜索，3 秒总预算包含 A 的 1 秒。", ha="center", fontsize=9)
+    fig.suptitle(f"圆心覆盖停靠优化 A/B · 20/20 全清且无碰撞 · 停靠减少 {summary['saved_stop_fraction']:.1%}", fontsize=15)
+    fig.text(.5, .02, "R：随机分布，C：10 簇 × 4 个非重叠目标。两者均要求圆心在区域内；B 的 6 秒总预算包含 A 的 3 秒。", ha="center", fontsize=9)
     fig.tight_layout(rect=(0, .05, 1, .95))
     fig.savefig(output / "stops-ab.png")
     plt.close(fig)
@@ -112,7 +120,7 @@ def render_results(output, summary):
     records = [json.loads((output / f"{label}-{name}.json").read_text()) for label in ("A", "B")]
     scene = restore_scene(records[0]["initial"])
     fig, axes = plt.subplots(1, 2, figsize=(13, 6), dpi=130)
-    for ax, record, label, color in zip(axes, records, ("A 原长度模式", "B 停靠优化"), ("#6086b9", "#159477")):
+    for ax, record, label, color in zip(axes, records, ("A 长度优先（圆心覆盖）", "B 停靠优化（圆心覆盖）"), ("#6086b9", "#159477")):
         result = record["result"]
         final = replay(scene, result["goals"], pickup_stops=result["pickup_stops"])
         ax.set(xlim=(0, scene.width), ylim=(0, scene.height), aspect="equal", xlabel="x / m", ylabel="y / m")

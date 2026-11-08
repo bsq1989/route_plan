@@ -189,6 +189,7 @@ def _scene(request):
     world = {"world": {"width": request.width, "height": request.height, "step_time": .04},
              "robot": {"state": list(request.pose)},
              "custom": {"random_count": 0, "target_diameter": request.target_diameter,
+                        "pickup_rule": "center" if request.method == "stops" else "contact",
                         "collection_mode": "at_stop" if request.method == "stops" else "contact"}}
     with TemporaryDirectory(prefix="route-plan-input-") as directory:
         world_path, robot_path = Path(directory) / "world.yaml", Path(directory) / "robot.yaml"
@@ -223,7 +224,8 @@ def plan(request: PlanningRequest | Mapping) -> PlanningResponse:
                                 initially_collected_ids=initially_collected, resolved_request=resolved,
                                 expected_collected_ids=list(initially_collected),
                                 optimization=deepcopy(result.optimization),
-                                metrics={"expanded": result.expanded, "trials": result.trials,
+                                metrics={"pickup_rule": scene.pickup_rule, "collection_mode": scene.collection_mode,
+                                         "expanded": result.expanded, "trials": result.trials,
                                          "backtracks": result.backtracks, "ompl_calls": result.ompl_calls,
                                          "best_remaining": result.best_remaining,
                                          "planner_elapsed": result.elapsed})

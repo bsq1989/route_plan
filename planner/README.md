@@ -2,7 +2,7 @@
 
 跨工程集成可使用独立的 [纯算法 Python SDK](../docs/python-sdk.md)，无需安装仿真显示依赖，附带 Python 和 JSON 两种 example。
 
-新增 `--method stops`：按“拾取停靠次数优先、路程其次”规划，一个停靠位可同时覆盖多个不重叠目标。目标只在明确的停靠位清除，使用 `result.pickup_stops` 执行/回放；中间位姿不计入拾取停靠数。命令示例：`uv run --project planner route-plan solve --method stops --scenario random --seed 42 --timeout 3 --gif sim/output/stops.gif`。验证与限制见 [SDK v0.2.0 发版说明](../docs/releases/sdk-v0.2.0.md)。
+新增 `--method stops`：按“拾取停靠次数优先、路程其次”规划，一个停靠位可同时覆盖多个不重叠目标，要求每个目标圆心都在消除矩形内。目标只在明确的停靠位清除，使用 `result.pickup_stops` 执行/回放；中间位姿不计入拾取停靠数。命令示例：`uv run --project planner route-plan solve --method stops --scenario random --seed 42 --timeout 3 --gif sim/output/stops.gif`。验证与限制见 [SDK v0.2.1 修正版](../docs/releases/sdk-v0.2.1.md)。
 
 当前默认目标为直径 10 cm 的圆，候选位姿、几何回放及长度下界均考虑目标半径。自动窗口、GIF、快照与对比图按实际 map 尺寸绘制圆形目标。记录保留目标直径；未带尺寸的历史记录按原点模型回放。
 

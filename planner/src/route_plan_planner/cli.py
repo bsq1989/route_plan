@@ -40,13 +40,16 @@ def _geometry(scene):
     return {"target_shape": "circle" if scene.target_diameter > 0 else "point",
             "target_diameter": scene.target_diameter, "dimensions": scene.dimensions,
             "collector_gap": scene.collector_gap, "collector_lateral_offset": scene.collector_offset,
-            "collection_mode": scene.collection_mode, "rule_version": scene.rule_version}
+            "collection_mode": scene.collection_mode, "rule_version": scene.rule_version,
+            "pickup_rule": scene.pickup_rule}
 
 
 def _plan_record(scene, options, method="feasibility"):
     if method == "stops":
         scene.collection_mode = "at_stop"
         scene.config["custom"]["collection_mode"] = "at_stop"
+        scene.pickup_rule = "center"
+        scene.config["custom"]["pickup_rule"] = "center"
     initial = describe_scene(scene)
     planner = {"length": LengthPlanner, "feasibility": StaticPlanner, "stops": StopsPlanner}[method]
     result = planner(options).plan(scene)

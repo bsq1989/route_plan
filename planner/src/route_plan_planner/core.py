@@ -94,11 +94,11 @@ class StaticPlanner:
 
     def _candidates(self, scene: Scene) -> list[Pose]:
         candidates = []
-        pickup_reach = max(math.hypot(x, y) for x, y in scene.collector.corners) + scene.target_radius
+        pickup_reach = max(math.hypot(x, y) for x, y in scene.collector.corners) + scene.pickup_radius
         # Disk centres may be outside the tool but must clear the safety body.
-        near = max(scene.collector.xmin - scene.target_radius,
+        near = max(scene.collector.xmin - scene.pickup_radius,
                    scene.safety_body.xmax + scene.target_radius) + .015
-        far = scene.collector.xmax + scene.target_radius - min(.015, (scene.collector.xmax - scene.collector.xmin) / 10)
+        far = scene.collector.xmax + scene.pickup_radius - min(.015, (scene.collector.xmax - scene.collector.xmin) / 10)
         depths = (far, (near + far) / 2) if near < far else ((scene.collector.xmin + scene.collector.xmax) / 2,)
         offset = (scene.collector.ymin + scene.collector.ymax) / 2
         for tx, ty in scene.targets.values():
@@ -114,7 +114,7 @@ class StaticPlanner:
                 for angle in pickup_angles:
                     c, s = math.cos(angle), math.sin(angle)
                     if scene.collector.intersects_circle(c * dx + s * dy, -s * dx + c * dy,
-                                                         scene.target_radius):
+                                                         scene.pickup_radius):
                         candidates.append((*scene.pose[:2], normalize(angle)))
             for angle in angles:
                 c, s = math.cos(angle), math.sin(angle)

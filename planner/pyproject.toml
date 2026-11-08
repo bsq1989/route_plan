@@ -1,6 +1,6 @@
 [project]
 name = "route-plan-planner"
-version = "0.3.0"
+version = "0.3.1"
 description = "Static task and motion planning baseline for route-plan-sim"
 requires-python = ">=3.11"
 dependencies = ["route-plan-sim", "ompl==2.0.1"]

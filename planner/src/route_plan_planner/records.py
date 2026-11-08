@@ -37,6 +37,9 @@ def restore_scene(record: dict) -> Scene:
     config["robot"]["state"] = state["pose"]
     config["custom"]["random_count"] = 0
     config["custom"]["rule_version"] = config["custom"].get("rule_version", 1)
+    # SDK <=0.2.0 stop archives accepted disk contact. Replay them honestly;
+    # newly generated stop requests explicitly record the centre rule.
+    config["custom"]["pickup_rule"] = config["custom"].get("pickup_rule", "contact")
     # Older records used mathematical points. Preserve that model explicitly.
     diameter = state.get("target_diameter", config["custom"].get("target_diameter", 0.))
     if "target_diameter" in state and "target_diameter" in config["custom"]:
@@ -70,6 +73,7 @@ def restore_scene(record: dict) -> Scene:
     scene.config = deepcopy(record["world_config"])
     scene.config["custom"]["target_diameter"] = diameter
     scene.config["custom"]["rule_version"] = scene.rule_version
+    scene.config["custom"]["pickup_rule"] = scene.pickup_rule
     return scene
 
 

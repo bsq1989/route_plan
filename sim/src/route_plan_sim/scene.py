@@ -129,6 +129,10 @@ class Scene:
         if self.collection_mode not in ("contact", "at_stop"):
             raise ValueError("Unsupported collection_mode")
         custom["collection_mode"] = self.collection_mode
+        self.pickup_rule = custom.get("pickup_rule", "center" if self.collection_mode == "at_stop" else "contact")
+        if self.pickup_rule not in ("contact", "center"):
+            raise ValueError("Unsupported pickup_rule")
+        custom["pickup_rule"] = self.pickup_rule
         self.width, self.height = finite(world["width"]), finite(world["height"])
         if finite(world["step_time"]) <= 0:
             raise ValueError("step_time must be positive")
@@ -196,6 +200,12 @@ class Scene:
         return self.target_diameter / 2
 
     @property
+    def pickup_radius(self) -> float:
+        # Pickup acceptance uses the centre in the new stop model. The real
+        # disk radius is still used, independently, for every body collision.
+        return 0. if self.pickup_rule == "center" else self.target_radius
+
+    @property
     def target_groups(self) -> tuple[tuple[int, ...], ...]:
         """Connected overlapping disks form one atomic collection task.
 
@@ -228,6 +238,11 @@ class Scene:
         return result
 
     def _collect_at_pose(self) -> None:
+        if self.pickup_rule == "center":
+            for key, point in list(self.targets.items()):
+                if self.collector.contains(*self.local_point(*point)):
+                    self.collected[key] = self.targets.pop(key)
+            return
         for group in self.target_groups:
             if any(self.collector.intersects_circle(*self.local_point(*self.targets[key]), self.target_radius)
                    for key in group):
@@ -424,12 +439,13 @@ class Scene:
         failure = "Map boundary" if math.isfinite(stop) else None
         collision_point = None
         collections = []
-        for group in self.target_groups:
+        groups = tuple((key,) for key in self.targets) if self.pickup_rule == "center" else self.target_groups
+        for group in groups:
             contacts = []
             for key in group:
                 local = self.local_point(*self.targets[key])
                 contacts.append((self.safety_body.first_contact(*local, distance, rotation, self.target_radius),
-                                 (self.collector.first_contact(*local, distance, rotation, self.target_radius)
+                                 (self.collector.first_contact(*local, distance, rotation, self.pickup_radius)
                                   if self.collection_mode == "contact" else math.inf), key))
             body_time, _, hit = min(contacts)
             collect_time = min(contact[1] for contact in contacts)
