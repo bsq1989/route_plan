@@ -1,6 +1,6 @@
 # 纯算法 Python SDK 交付与使用
 
-独立分发包为 `route-plan-sdk 0.1.0`，导入名为 `route_plan_sdk`。它提供静态场景的任务规划与路径长度优化，输入普通业务数据，不要求调用方构建 `Scene` 或提供仿真界面配置。
+独立分发包为 `route-plan-sdk 0.2.0`，导入名为 `route_plan_sdk`。它提供静态场景的任务规划与路径长度优化，输入普通业务数据，不要求调用方构建 `Scene` 或提供仿真界面配置。
 
 包内只包含算法和规划必需的私有几何校验内核。不包含 IR-SIM、绘图、动画、交互窗口、演示入口或实车控制功能。该内核与仓库内的几何规则同源，在打包时复制到私有命名空间，避免另行维护一套碰撞实现。
 
@@ -10,9 +10,9 @@
 
 | 文件 | 用法 |
 | --- | --- |
-| `route_plan_sdk-0.1.0-py3-none-any.whl` | 在其他工程的 Python 环境中直接安装 |
-| `route_plan_sdk-0.1.0.tar.gz` | 标准源码分发包，可直接 pip 安装 |
-| `route_plan_sdk-0.1.0-source.zip` | 解压后可查看、修改源码，含完整说明与两个 example |
+| `route_plan_sdk-0.2.0-py3-none-any.whl` | 在其他工程的 Python 环境中直接安装 |
+| `route_plan_sdk-0.2.0.tar.gz` | 标准源码分发包，可直接 pip 安装 |
+| `route_plan_sdk-0.2.0-source.zip` | 解压后可查看、修改源码，含完整说明与两个 example |
 | `SHA256SUMS` | 核对所交付文件的 SHA-256 |
 
 无需安装原仓库的 `sim/` 或 `planner/` 包，也无需配置 `PYTHONPATH`。源代码包中包含默认车辆 YAML，默认尺寸直接来自构建时的 `sim/config/robot.yaml`，不在 API 中重复硬编码。
@@ -21,18 +21,20 @@
 
 SDK 运行要求 Python `>=3.10`；运行依赖仅为 `PyYAML>=6.0.3`、`ompl==2.0.1`。源码构建使用 Hatchling，由 pip 的隔离构建流程自动安装；Hatchling 不是目标环境的运行依赖。仓库内的打包脚本使用 Python 3.11 以上，业务工程只安装、调用 SDK 时不受此限制。
 
-SDK 不引入 IR-SIM、Matplotlib、NumPy、SciPy、Shapely、Pillow 或 ROS。OMPL 含本地二进制组件，目标平台需要能够安装对应的 OMPL 2.0.1 发行包或提供可用构建。独立环境验证平台为 macOS arm64，已验证 Python 3.11 及 3.10.20。Python 3.10 的 wheel 和源码分发包分别在全新环境中安装，各通过 12 项公共 API 测试、环境隔离检查和实际 OMPL 绕行清除检查，两个 example 均成功。
+SDK 不引入 IR-SIM、Matplotlib、NumPy、SciPy、Shapely、Pillow 或 ROS。OMPL 含本地二进制组件，目标平台需要能够安装对应的 OMPL 2.0.1 发行包或提供可用构建。独立环境验证平台为 macOS arm64。v0.1.1 的 Python 3.10.20 wheel 和源码包各通过 14 项公共 API 测试；此前 v0.1.0 另已验证 Python 3.11、依赖隔离和实际 OMPL 绕行。
+
+v0.1.1 热修复通过 69 项仿真测试和 44 项规划器测试。安装后的 Python 3.10 SDK 另回归十组随机场景（种子 41、57、28、38、49、70、1、97、85、54），每组 40 个原目标加 10 个重叠观测，全部 50/50 清除；按 0.013 秒和 0.7 秒两种仿真步长回放，碰撞、剩余目标及 ID 丢失均为零。
 
 ```bash
 python3.10 -m venv .venv
 source .venv/bin/activate
-python -m pip install /完整路径/route_plan_sdk-0.1.0-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.0-py3-none-any.whl
 
 # 或在源码解压目录执行
 python -m pip install .
 
 # 需要在其他工程中修改本地源码时
-python -m pip install -e /完整路径/route-plan-sdk-0.1.0
+python -m pip install -e /完整路径/route-plan-sdk-0.2.0
 ```
 
 Windows PowerShell 的环境激活命令为 `.venv\Scripts\Activate.ps1`，安装命令相同。具体 OMPL 平台可用性以目标环境实际安装为准。
@@ -50,7 +52,7 @@ request = PlanningRequest(
     pose=(3.0, 4.5, 0.0),
     targets=[Target("item-a", 5.0, 4.5), Target("item-b", 6.5, 5.0)],
     target_diameter=0.10,
-    method="length",
+    method="stops",
     timeout=3.0,
 )
 
@@ -70,7 +72,11 @@ else:
 
 `PlanningRequest` 接受矩形地图宽高、当前车身中心位姿、目标列表、统一目标直径、方法与时限。可选参数包括车辆 YAML 路径或配置字典、`request_id`、`frame_id`、RRT 开关与随机种子。
 
-坐标单位为米，yaw 为弧度。`frame_id` 只作关联标识，不执行坐标转换。物体 ID 支持非空字符串和整数，并保持原类型；重复 ID、重复圆心及物体重叠会报错，不会为了求解而静默丢目标。
+坐标单位为米，yaw 为弧度。`frame_id` 只作关联标识，不执行坐标转换。物体 ID 支持非空字符串和整数，并保持原类型；重复 ID 会报错。v0.1.1 起允许圆心重合及目标圆重叠，重叠连通组一次清除，消除器接触任意成员即在同一步返回整组原始 ID。仅相切不分组。碰撞按清除前全部成员圆的并集检查，车身先接触或同时接触仍判碰撞。初始接触也按整组处理，输入顺序不影响分组。
+
+v0.1.2 起，车头到消除区的间距统一使用 `body_margin`，消除区宽深不变。正前方外扩区与左右、后方采用同一碰撞规则，圆接触安全矩形即失败，碰撞优先。无需配置独立 `gap`，旧输入字段兼容读取，响应车型中 `collector.gap` 返回实际推导值。新场景规则版本为 2；历史归档按记录版本回放。
+
+v0.2.0 新增 `method="stops"`：全部清除且安全是硬条件，先优化拾取停靠次数，再优化路程。新增 `pickup_stops` 和 `stop_count` 输出，`goal_index` 从 0 开始对应 `goals`。到达指定完整位姿后一起处理 `target_ids`；途中和转向不自动消除，所有目标在停靠前仍参与碰撞检查，不能把沿途先后经过多个目标算作一次停车。输入字段和默认 `method="length"` 保持兼容，启用新功能需要显式选择 `stops`。详见 [SDK v0.2.0 发版说明](releases/sdk-v0.2.0.md)。
 
 `PlanningResponse` 返回：
 
@@ -83,7 +89,7 @@ else:
 
 `response.to_dict()` 返回可 JSON 序列化的数据。失败时 `goals / steps` 为空、`length` 为 `None`；非法输入或配置会抛出 `ValueError`，文件错误可能抛出 `OSError`，应与求解未找到解区分。
 
-目标圆若一开始已接触消除区，会按模型计入 `initially_collected_ids`。所有拾取字段均为模型预测，不代表实车反馈。结果需逐条执行，并保持原地转向、直线前进和末端转向的规则；SDK 不发送实际控制指令。
+在 `feasibility/length` 模式中，目标圆若一开始已接触消除区，会按模型计入 `initially_collected_ids`；`stops` 模式则要求一个显式拾取停靠，初始不自动消除。所有拾取字段均为模型预测，不代表实车反馈。结果需逐条执行，并保持原地转向、直线前进和末端转向的规则；SDK 不发送实际控制指令。
 
 完整协议及约束还可查看分发包的 [README 模板](../planner/sdk/README.md)。
 

@@ -17,6 +17,21 @@ class CirclePlanningTest(unittest.TestCase):
         scene.targets.clear()
         return scene
 
+    def test_overlap_group_roundtrip_and_replay_preserve_every_id(self):
+        scene = self.empty()
+        ids = scene.add_targets([(5, 4.5), (5.08, 4.5), (5.16, 4.5), (7, 5)])
+        record = json.loads(json.dumps(describe_scene(scene)))
+        restored = restore_scene(record)
+        self.assertEqual(restored.targets, scene.targets)
+        self.assertEqual(restored.target_groups, scene.target_groups)
+        result = StaticPlanner().plan(restored)
+        self.assertEqual(result.status, "success", result.reason)
+        for dt in (.013, .7):
+            final = replay(restored, result.goals, dt=dt)
+            self.assertIsNone(final.failure)
+            self.assertFalse(final.targets)
+            self.assertEqual(set(final.collected), set(ids))
+
     def test_plan_uses_circle_edge_without_driving_centre_into_collector(self):
         scene = self.empty()
         scene.add_target(5, 4.5)

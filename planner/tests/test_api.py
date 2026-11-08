@@ -81,20 +81,39 @@ class PublicApiTest(unittest.TestCase):
         self.assertIsNone(result.length)
         self.assertEqual(result.remaining_ids, ["item-a", 205])
 
-    def test_duplicate_ids_duplicate_centres_and_overlaps_are_rejected(self):
+    def test_duplicate_ids_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "unique"):
             self.request(targets=[Target("same", 5, 4.5), Target("same", 6, 5)])
-        for distance in (0., .02, .08):
-            with self.subTest(distance=distance), self.assertRaises(ValueError):
-                plan(self.request(targets=[Target("a", 5, 4.5), Target("b", 5 + distance, 4.5)]))
 
-    def test_overlapping_objects_at_initial_tool_contact_are_rejected(self):
-        for distance in (0., .02, .08):
-            with self.subTest(distance=distance), self.assertRaises(ValueError):
-                plan(self.request(targets=[Target("a", 3.5, 4.5), Target("b", 3.5 + distance, 4.5)]))
+    def test_overlapping_objects_share_one_collection_step_and_keep_all_ids(self):
+        for method in ("feasibility", "length"):
+            for distance in (0., .02, .08):
+                with self.subTest(method=method, distance=distance):
+                    request = self.request(method=method, timeout=.5,
+                                           targets=[Target("a", 5, 4.5), Target(205, 5 + distance, 4.5)])
+                    result = plan(request)
+                    self.assertTrue(result.success, result.reason)
+                    events = [set(step.expected_collected_ids) for step in result.steps if step.expected_collected_ids]
+                    self.assertEqual(events, [{"a", 205}])
+                    self.assertEqual(set(result.expected_collected_ids), {"a", 205})
+                    self.assertTrue(plan(result.resolved_request).success)
+
+    def test_overlapping_chain_at_initial_contact_is_order_independent(self):
+        targets = [Target("a", 3.5, 4.5), Target("b", 3.58, 4.5), Target("c", 3.66, 4.5)]
+        for sequence in (targets, list(reversed(targets))):
+            result = plan(self.request(targets=sequence))
+            self.assertTrue(result.success)
+            self.assertEqual(set(result.initially_collected_ids), {"a", "b", "c"})
+            self.assertEqual(result.goals, [])
+
+    def test_group_member_inside_body_or_outside_map_is_still_invalid(self):
+        for targets in ([Target("tool", 3.44, 4.5), Target("body", 3.39, 4.5)],
+                        [Target("inside", .12, 2), Target("outside", .04, 2)]):
+            with self.subTest(targets=targets), self.assertRaises(ValueError):
+                plan(self.request(targets=targets))
 
     def test_tangent_objects_and_initial_contact_keep_both_ids(self):
-        result = plan(self.request(targets=[Target("a", 3.5, 4.5), Target("b", 3.6, 4.5)]))
+        result = plan(self.request(targets=[Target("a", 3.6, 4.5), Target("b", 3.7, 4.5)]))
         self.assertTrue(result.success)
         self.assertEqual(result.initially_collected_ids, ["a"])
         self.assertEqual(set(result.expected_collected_ids), {"a", "b"})

@@ -210,11 +210,13 @@ class LengthPlanner:
                     for i, a in scene.targets.items() for j, b in scene.targets.items()}
 
         def bound(current):
-            remaining = set(current.targets)
+            remaining = set(current.target_groups)
             if not remaining:
                 return 0.
-            distances = {key: max(0., math.dist(current.pose[:2], current.targets[key]) - radius)
-                         for key in remaining}
+            # Reaching any disk removes its entire overlap component. A bound
+            # that requires visiting every member would overestimate the cost.
+            distances = {group: min(max(0., math.dist(current.pose[:2], current.targets[key]) - radius)
+                                    for key in group) for group in remaining}
             farthest = max(distances.values())
             total = 0.
             while remaining:
@@ -222,7 +224,8 @@ class LengthPlanner:
                 total += distances[key]
                 remaining.remove(key)
                 for other in remaining:
-                    distances[other] = min(distances[other], pair_gap[key, other])
+                    distances[other] = min(distances[other],
+                                           min(pair_gap[a, b] for a in key for b in other))
             return max(total, farthest)
 
         # A layer represents collection/motion decisions, not one target each:

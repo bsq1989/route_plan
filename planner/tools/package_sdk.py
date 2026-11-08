@@ -64,6 +64,7 @@ def verify_install(uv, wheel, source, workspace):
         run([python, "-I", consumer / "app.py"], cwd=consumer, stdout=output)
     run([python, "-I", source / "examples/from_json.py", source / "examples/request.json",
          "--output", workspace / "response.json"], cwd=consumer)
+    run([python, "-I", source / "examples/multi_pickup.py"], cwd=consumer)
     result = json.loads((workspace / "response.json").read_text())
     if not result["success"] or set(result["expected_collected_ids"]) != {"object-101", "object-205"}:
         raise ValueError("Installed example did not collect both expected targets")
@@ -126,7 +127,7 @@ def package(output, verify=False):
 def main():
     parser = argparse.ArgumentParser(description="固定纯算法 SDK 打包入口，默认不跑完整回归")
     parser.add_argument("--output", type=Path, default=ROOT / "sim/output/sdk/dist")
-    parser.add_argument("--verify", action="store_true", help="额外创建独立环境，验证安装及两个 example")
+    parser.add_argument("--verify", action="store_true", help="额外创建独立环境，验证安装及三个 example")
     args = parser.parse_args()
     try:
         package(args.output, args.verify)

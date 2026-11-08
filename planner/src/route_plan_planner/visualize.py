@@ -59,7 +59,7 @@ def _canvas(scene):
     return fig, update
 
 
-def save_animation(scene: Scene, goals, output: Path, dt: float = .4, fps: int = 16):
+def save_animation(scene: Scene, goals, output: Path, dt: float = .4, fps: int = 16, pickup_stops=None):
     import matplotlib.pyplot as plt
     from matplotlib.animation import PillowWriter
 
@@ -71,11 +71,12 @@ def save_animation(scene: Scene, goals, output: Path, dt: float = .4, fps: int =
     output.parent.mkdir(parents=True, exist_ok=True)
     controller = PoseController(trial)
     writer = PillowWriter(fps=fps)
+    stops = {stop["goal_index"]: stop for stop in pickup_stops or []}
     try:
         with writer.saving(fig, str(output), dpi=80):
             for _ in range(8):
                 writer.grab_frame()
-            for goal in goals:
+            for index, goal in enumerate(goals):
                 controller.set_goal(*goal)
                 while controller.command is not None and not trial.failure:
                     controller.step(dt)
@@ -83,6 +84,12 @@ def save_animation(scene: Scene, goals, output: Path, dt: float = .4, fps: int =
                     writer.grab_frame()
                 if trial.failure:
                     break
+                if index in stops:
+                    removed = trial.collect_at_stop()
+                    if set(removed) != set(stops[index]["target_ids"]):
+                        raise ValueError("Animation pickup coverage differs from the plan")
+                    update(trial)
+                    writer.grab_frame()
             for _ in range(16):
                 writer.grab_frame()
     finally:
@@ -147,44 +154,57 @@ def save_comparison(scene: Scene, a_goals, b_goals, output: Path):
         plt.close(fig)
 
 
-def show(scene: Scene, goals, display=True):
+def show(scene: Scene, goals, display=True, pickup_stops=None):
     """Reuse IR-SIM's viewer; manual edits cancel the queued static plan."""
     from route_plan_sim.app import Viewer
 
     class PlanViewer(Viewer):
         def __init__(self):
-            self.pending = deque(goals)
+            self.pending = deque(enumerate(goals))
+            self.pickup_stops = {stop["goal_index"]: stop for stop in pickup_stops or []}
+            self.pending_pickup = None
             super().__init__(scene.clone(), display=display)
             self.note("静态自动清除计划已加载。\n空格暂停，Esc 取消。")
 
         def set_goal(self, *args):
             self.pending.clear()
+            self.pending_pickup = None
             super().set_goal(*args)
 
         def reset(self, scenario=None):
             self.pending.clear()
+            self.pending_pickup = None
             super().reset(scenario)
 
         def apply_dimensions(self):
             self.pending.clear()
+            self.pending_pickup = None
             super().apply_dimensions()
 
         def on_key(self, event):
             if event.key == "escape":
                 self.pending.clear()
+                self.pending_pickup = None
             super().on_key(event)
 
         def on_click(self, event):
             # Static replay has a fixed observation set; editing cancels it.
             if event.inaxes is self.ax:
                 self.pending.clear()
+                self.pending_pickup = None
                 self.motion.stop()
             super().on_click(event)
 
         def tick(self):
+            if self.pending_pickup is not None and not self.command and not self.paused and not self.scene.failure:
+                removed = self.scene.collect_at_stop()
+                if set(removed) != set(self.pending_pickup["target_ids"]):
+                    raise ValueError("Viewer pickup coverage differs from the plan")
+                self.pending_pickup = None
             if self.pending and not self.command and not self.paused and not self.scene.failure:
-                goal = self.pending.popleft()
+                index, goal = self.pending.popleft()
                 self.motion.set_goal(*goal)
+                self.pending_pickup = self.pickup_stops.get(index)
                 self._update_pose_fields(*goal)
                 self.note(f"自动清除中，剩余 {len(self.scene.targets)} 个目标。\n空格暂停，Esc 取消。")
             super().tick()

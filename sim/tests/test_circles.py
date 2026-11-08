@@ -109,13 +109,72 @@ class CircleSceneTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             scene.set_dimensions(**(scene.dimensions | {"body_margin": .00002}))
 
-    def test_distinct_circle_overlap_rejected_but_mutual_tangency_allowed(self):
+    def test_overlapping_chain_collects_atomically_but_tangency_stays_separate(self):
+        scene = Scene()
+        scene.targets.clear()
+        ids = scene.add_targets([(5, 4.5), (5.08, 4.5), (5.16, 4.5), (6, 4.5), (6.1, 4.5)])
+        self.assertEqual(scene.target_groups, (ids[:3], (ids[3],), (ids[4],)))
+        whole, framed = scene.clone(), scene.clone()
+        whole.forward(1.461)
+        for _ in range(1000):
+            framed.forward(1.461 / 1000)
+        for final in (whole, framed):
+            self.assertIsNone(final.failure)
+            self.assertEqual(set(final.collected), set(ids[:3]))
+            self.assertEqual(set(final.targets), set(ids[3:]))
+        whole.forward(6 - whole.pose[0] - whole.collector.xmax - whole.target_radius + .001)
+        self.assertIn(ids[3], whole.collected)
+        self.assertIn(ids[4], whole.targets)
+
+    def test_batch_validation_precedes_any_collection(self):
+        scene = Scene()
+        scene.targets.clear()
+        before = scene.snapshot()
+        with self.assertRaises(ValueError):
+            scene.add_targets([(3.44, 4.5), (3.39, 4.5)])
+        self.assertEqual(scene.snapshot(), before)
+
+    def test_group_outer_member_can_collide_before_tool_contact(self):
+        for earlier in (.002, 0.):
+            with self.subTest(earlier=earlier):
+                scene = Scene()
+                scene.targets.clear()
+                first = (5, 4.7249)
+                contact = scene.collector.first_contact(*scene.local_point(*first), 3, 0, scene.target_radius)
+                other = (scene.pose[0] + 3 * contact + scene.safety_body.xmax + scene.target_radius - earlier,
+                         first[1] + .02)
+                bridge = ((first[0] + other[0]) / 2, (first[1] + other[1]) / 2)
+                ids = scene.add_targets([first, bridge, other])
+                self.assertEqual(scene.target_groups, (ids,))
+                scene.forward(3)
+                self.assertIsNotNone(scene.failure)
+                self.assertFalse(scene.collected)
+                self.assertEqual(set(scene.targets), set(ids))
+
+    def test_group_cache_tracks_mutation_and_clone_is_independent(self):
         scene = self.empty()
-        scene.add_target(6, 6)
-        with self.assertRaisesRegex(ValueError, "overlap"):
-            scene.add_target(6.09, 6)
-        scene.add_target(6.1, 6)
-        self.assertEqual(len(scene.targets), 2)
+        ids = scene.add_targets([(5, 4.5), (5.08, 4.5), (5.16, 4.5)])
+        self.assertEqual(scene.target_groups, (ids,))
+        clone = scene.clone()
+        del clone.targets[ids[1]]
+        self.assertEqual(clone.target_groups, ((ids[0],), (ids[2],)))
+        self.assertEqual(scene.target_groups, (ids,))
+
+    def test_front_margin_is_collision_even_at_collector_rear_edge(self):
+        scene = Scene()
+        scene.targets.clear()
+        self.assertAlmostEqual(scene.collector_gap, scene.body_margin)
+        self.assertAlmostEqual(scene.collector.xmin, scene.safety_body.xmax)
+        x = scene.pose[0] + scene.safety_body.xmax + scene.target_radius
+        with self.assertRaisesRegex(ValueError, "body"):
+            scene.add_target(x, scene.pose[1])
+        # A supplied bad state must also freeze at t=0 rather than be collected.
+        scene.targets[999] = (x, scene.pose[1])
+        before = scene.pose
+        scene.forward(.1)
+        self.assertIsNotNone(scene.failure)
+        self.assertEqual(scene.pose, before)
+        self.assertFalse(scene.collected)
 
     def test_circle_tie_prioritizes_body_collision_over_collection(self):
         scene = self.empty()

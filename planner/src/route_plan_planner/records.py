@@ -36,6 +36,7 @@ def restore_scene(record: dict) -> Scene:
         raise ValueError("Cannot replay a failed initial scene")
     config["robot"]["state"] = state["pose"]
     config["custom"]["random_count"] = 0
+    config["custom"]["rule_version"] = config["custom"].get("rule_version", 1)
     # Older records used mathematical points. Preserve that model explicitly.
     diameter = state.get("target_diameter", config["custom"].get("target_diameter", 0.))
     if "target_diameter" in state and "target_diameter" in config["custom"]:
@@ -52,11 +53,10 @@ def restore_scene(record: dict) -> Scene:
     remaining = {}
     for raw_key, point in state["remaining"].items():
         key = int(raw_key)
-        before = len(scene.targets)
-        scene.add_target(*point)
-        if len(scene.targets) != before + 1:
-            raise ValueError("Remaining target is duplicated or already inside collector")
         remaining[key] = tuple(point)
+    scene.add_targets(remaining.values())
+    if scene.collected:
+        raise ValueError("Remaining target group is already inside collector")
     scene.targets = remaining
     scene.collected = {int(key): tuple(point) for key, point in state["collected"].items()}
     for point in scene.collected.values():
@@ -69,6 +69,7 @@ def restore_scene(record: dict) -> Scene:
     # Retain the stored source configuration for subsequent record exports.
     scene.config = deepcopy(record["world_config"])
     scene.config["custom"]["target_diameter"] = diameter
+    scene.config["custom"]["rule_version"] = scene.rule_version
     return scene
 
 

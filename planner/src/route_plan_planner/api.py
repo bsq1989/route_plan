@@ -12,10 +12,11 @@ import yaml
 
 from route_plan_sim import Scene
 from route_plan_sim.config import default_robot_config
-from route_plan_sim.scene import EPS, normalize
+from route_plan_sim.scene import normalize
 
 from .core import PlannerOptions, StaticPlanner
 from .length import LengthPlanner
+from .stops import StopsPlanner
 from .motion import execute
 from .records import describe_scene
 
@@ -80,8 +81,8 @@ class PlanningRequest:
         if len(pose) != 3:
             raise ValueError("pose must contain x, y, yaw in radians")
         object.__setattr__(self, "pose", (pose[0], pose[1], normalize(pose[2])))
-        if self.method not in ("feasibility", "length"):
-            raise ValueError("method must be feasibility or length")
+        if self.method not in ("feasibility", "length", "stops"):
+            raise ValueError("method must be feasibility, length or stops")
         if not isinstance(self.use_ompl, bool):
             raise ValueError("use_ompl must be boolean")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int) or not 0 <= self.seed < 2**32:
@@ -98,16 +99,6 @@ class PlanningRequest:
             raise ValueError("targets must contain Target objects or {id, x, y} mappings") from error
         if len({item.id for item in targets}) != len(targets):
             raise ValueError("Target ids must be unique")
-        # Validate the entire observed snapshot before initial tool contacts
-        # are consumed. Otherwise two overlapping objects inside the tool
-        # could both disappear during sequential Scene.add_target calls.
-        for index, target in enumerate(targets):
-            for other in targets[:index]:
-                distance = math.hypot(target.x - other.x, target.y - other.y)
-                if distance < .025:
-                    raise ValueError("Target centres must not duplicate or nearly coincide")
-                if distance < self.target_diameter - EPS:
-                    raise ValueError("Target circles must not overlap")
         object.__setattr__(self, "targets", targets)
         if isinstance(self.robot_config, Mapping):
             object.__setattr__(self, "robot_config", deepcopy(dict(self.robot_config)))
@@ -141,6 +132,13 @@ class PlanStep:
     expected_collected_ids: tuple[TargetId, ...] = ()
 
 
+@dataclass(frozen=True)
+class PickupStop:
+    goal_index: int
+    pose: Pose
+    target_ids: tuple[TargetId, ...]
+
+
 @dataclass
 class PlanningResponse:
     status: str
@@ -159,6 +157,8 @@ class PlanningResponse:
     metrics: dict = field(default_factory=dict)
     resolved_request: dict = field(default_factory=dict)
     schema_version: int = 1
+    pickup_stops: list[PickupStop] = field(default_factory=list)
+    stop_count: int | None = None
 
     @property
     def success(self):
@@ -172,6 +172,8 @@ class PlanningResponse:
         result["steps"] = [{"goal": list(step.goal), "expected_collected_ids": list(step.expected_collected_ids)}
                            for step in self.steps]
         result["final_pose"] = list(self.final_pose) if self.final_pose is not None else None
+        result["pickup_stops"] = [{"goal_index": stop.goal_index, "pose": list(stop.pose),
+                                    "target_ids": list(stop.target_ids)} for stop in self.pickup_stops]
         return result
 
 
@@ -186,7 +188,8 @@ def _scene(request):
     profile = deepcopy(profile)
     world = {"world": {"width": request.width, "height": request.height, "step_time": .04},
              "robot": {"state": list(request.pose)},
-             "custom": {"random_count": 0, "target_diameter": request.target_diameter}}
+             "custom": {"random_count": 0, "target_diameter": request.target_diameter,
+                        "collection_mode": "at_stop" if request.method == "stops" else "contact"}}
     with TemporaryDirectory(prefix="route-plan-input-") as directory:
         world_path, robot_path = Path(directory) / "world.yaml", Path(directory) / "robot.yaml"
         world_path.write_text(yaml.safe_dump(world), encoding="utf-8")
@@ -195,13 +198,8 @@ def _scene(request):
         except yaml.YAMLError as error:
             raise ValueError(f"Invalid robot_config: {error}") from error
         scene = Scene(config=world_path, robot_config=robot_path, scenario="random", seed=request.seed)
-    id_map = {}
-    for index, target in enumerate(request.targets, 1):
-        count = len(scene.targets) + len(scene.collected)
-        scene.add_target(target.x, target.y)
-        if len(scene.targets) + len(scene.collected) != count + 1:
-            raise ValueError(f"Target {target.id!r} duplicates another target centre")
-        id_map[index] = target.id
+    keys = scene.add_targets((target.x, target.y) for target in request.targets)
+    id_map = {key: target.id for key, target in zip(keys, request.targets)}
     return scene, id_map, describe_scene(scene)["vehicle_config"]
 
 
@@ -216,7 +214,8 @@ def plan(request: PlanningRequest | Mapping) -> PlanningResponse:
     scene, id_map, profile = _scene(request)
     initially_collected = [id_map[key] for key in scene.collected]
     options = PlannerOptions(timeout=request.timeout, ompl=request.use_ompl, seed=request.seed)
-    result = (LengthPlanner(options) if request.method == "length" else StaticPlanner(options)).plan(scene)
+    planner = {"length": LengthPlanner, "feasibility": StaticPlanner, "stops": StopsPlanner}[request.method]
+    result = planner(options).plan(scene)
     resolved = request.to_dict()
     resolved["robot_config"] = profile
     response = PlanningResponse(status=result.status, frame_id=request.frame_id, request_id=request.request_id,
@@ -232,9 +231,14 @@ def plan(request: PlanningRequest | Mapping) -> PlanningResponse:
         trace = scene.clone()
         steps = []
         try:
-            for goal in result.goals:
+            pickup_stops = {stop["goal_index"]: stop for stop in result.pickup_stops}
+            for index, goal in enumerate(result.goals):
                 before = set(trace.collected)
                 execute(trace, [goal])
+                if index in pickup_stops:
+                    removed = trace.collect_at_stop()
+                    if set(removed) != set(pickup_stops[index]["target_ids"]):
+                        raise ValueError("Pickup stop coverage differs from the plan")
                 steps.append(PlanStep(tuple(goal), tuple(id_map[key] for key in trace.collected if key not in before)))
         except ValueError as error:
             response.status, response.reason = "replay_failed", str(error)
@@ -248,5 +252,9 @@ def plan(request: PlanningRequest | Mapping) -> PlanningResponse:
                 response.final_pose = tuple(trace.pose)
                 response.expected_collected_ids = [id_map[key] for key in trace.collected]
                 response.remaining_ids = []
+                response.pickup_stops = [PickupStop(stop["goal_index"], tuple(stop["pose"]),
+                                                    tuple(id_map[key] for key in stop["target_ids"]))
+                                         for stop in result.pickup_stops]
+                response.stop_count = len(response.pickup_stops) if request.method == "stops" else None
     response.elapsed = time.monotonic() - started
     return response

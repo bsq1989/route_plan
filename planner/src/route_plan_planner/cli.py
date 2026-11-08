@@ -11,6 +11,7 @@ from route_plan_sim import Scene
 
 from .core import PlannerOptions, StaticPlanner
 from .length import LengthOptions, LengthPlanner
+from .stops import StopsPlanner
 from .motion import replay
 from .records import describe_scene, read_json, restore_scene, write_json
 
@@ -38,13 +39,19 @@ def _cases(args):
 def _geometry(scene):
     return {"target_shape": "circle" if scene.target_diameter > 0 else "point",
             "target_diameter": scene.target_diameter, "dimensions": scene.dimensions,
-            "collector_gap": scene.collector_gap, "collector_lateral_offset": scene.collector_offset}
+            "collector_gap": scene.collector_gap, "collector_lateral_offset": scene.collector_offset,
+            "collection_mode": scene.collection_mode, "rule_version": scene.rule_version}
 
 
 def _plan_record(scene, options, method="feasibility"):
+    if method == "stops":
+        scene.collection_mode = "at_stop"
+        scene.config["custom"]["collection_mode"] = "at_stop"
     initial = describe_scene(scene)
-    result = (LengthPlanner(options) if method == "length" else StaticPlanner(options)).plan(scene)
-    payload = {"schema_version": 1, "planner": "length-beam-v1" if method == "length" else "static-dfs-v1", "python": platform.python_version(),
+    planner = {"length": LengthPlanner, "feasibility": StaticPlanner, "stops": StopsPlanner}[method]
+    result = planner(options).plan(scene)
+    name = {"length": "length-beam-v1", "feasibility": "static-dfs-v1", "stops": "stop-cover-beam-v1"}[method]
+    payload = {"schema_version": 1, "planner": name, "python": platform.python_version(),
                "options": asdict(options), "geometry": _geometry(scene),
                "initial": initial, "result": result.to_dict()}
     if method == "length":
@@ -52,17 +59,17 @@ def _plan_record(scene, options, method="feasibility"):
     return result, payload
 
 
-def _render(args, scene, goals):
+def _render(args, scene, goals, pickup_stops=None):
     if args.gif or args.snapshot or args.show:
         from .visualize import save_animation, save_snapshot, show
         if args.gif:
-            final = save_animation(scene, goals, args.gif)
+            final = save_animation(scene, goals, args.gif, pickup_stops=pickup_stops)
             if final.failure or final.targets:
                 raise ValueError("Animation replay did not clear the scene")
         if args.snapshot:
-            save_snapshot(replay(scene, goals), args.snapshot)
+            save_snapshot(replay(scene, goals, pickup_stops=pickup_stops), args.snapshot)
         if args.show:
-            show(scene, goals)
+            show(scene, goals, pickup_stops=pickup_stops)
 
 
 def _solve(args):
@@ -78,7 +85,7 @@ def _solve(args):
           f"{result.elapsed:.3f}s; {result.length:.2f}m; "
           f"backtracks={result.backtracks}; record={args.output}")
     if result.status == "success":
-        _render(args, scene, result.goals)
+        _render(args, scene, result.goals, result.pickup_stops)
         return 0
     print(result.reason, file=sys.stderr)
     return 1
@@ -92,11 +99,12 @@ def _replay(args):
         raise ValueError("Only successful plans can be replayed")
     scene = restore_scene(record["initial"])
     goals = [tuple(goal) for goal in record["result"]["goals"]]
-    final = replay(scene, goals)
+    pickup_stops = record["result"].get("pickup_stops", [])
+    final = replay(scene, goals, pickup_stops=pickup_stops)
     if final.failure or final.targets:
         raise ValueError(f"Replay failed: {final.failure}; remaining={len(final.targets)}")
     print(f"replay success: {len(scene.targets)} -> 0")
-    _render(args, scene, goals)
+    _render(args, scene, goals, pickup_stops)
     return 0
 
 
@@ -115,7 +123,8 @@ def _benchmark(args):
                **{key: value for key, value in result.to_dict().items() if key not in ("goals", "final")}}
         rows.append(row)
         print(f"{name}: {result.status}, {result.elapsed:.3f}s, best_remaining={result.best_remaining}", flush=True)
-    summary = {"planner": "length-beam-v1" if args.method == "length" else "static-dfs-v1", "options": asdict(options),
+    summary = {"planner": {"length": "length-beam-v1", "feasibility": "static-dfs-v1",
+                            "stops": "stop-cover-beam-v1"}[args.method], "options": asdict(options),
                "geometry": _geometry(scene), "selected_cases": cases, "cases": rows,
                "total": len(rows), "success": sum(row["status"] == "success" for row in rows)}
     write_json(args.output / "summary.json", summary)
@@ -200,7 +209,7 @@ def main(argv=None):
         command.add_argument("--no-ompl", action="store_true")
         command.add_argument("--planner-seed", type=int, default=42)
     for command in (solve, batch):
-        command.add_argument("--method", choices=("feasibility", "length"), default="feasibility")
+        command.add_argument("--method", choices=("feasibility", "length", "stops"), default="feasibility")
     for command in (solve, play):
         command.add_argument("--show", action="store_true", help="打开 IR-SIM 窗口自动执行，空格暂停、Esc 停止")
         command.add_argument("--snapshot", type=Path)

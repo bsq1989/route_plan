@@ -14,18 +14,23 @@ def main():
         pose=(3.0, 4.5, 0.0),
         targets=[Target("object-101", 5.0, 4.5), Target("object-205", 6.5, 5.0)],
         target_diameter=0.10,
-        method="length",
+        method="stops",
         timeout=3.0,
     )
     response = plan(request)
     print(json.dumps(response.to_dict(), ensure_ascii=False, indent=2, allow_nan=False))
     if not response.success:
         raise SystemExit(f"Planning failed: {response.status}: {response.reason}")
-    for index, step in enumerate(response.steps, 1):
-        print(f"step {index}: map goal={step.goal}; expected pickups={step.expected_collected_ids}")
+    pickups = {stop.goal_index: stop for stop in response.pickup_stops}
+    print(f"pickup stops={response.stop_count}; path={response.length:.3f} m")
+    for index, step in enumerate(response.steps):
+        print(f"goal[{index}]: map goal={step.goal}")
+        if index in pickups:
+            print(f"  after arrival, pick this batch: {pickups[index].target_ids}")
         # Integration point: send this goal to your controller and wait for its
         # actual completion before dispatching the next goal. This example does
-        # not send hardware commands. Expected pickups are model predictions.
+        # not send hardware commands. At pickup checkpoints, confirm the batch
+        # pickup before continuing. Expected pickups are model predictions.
 
 
 if __name__ == "__main__":

@@ -64,15 +64,18 @@ class RobotConfigTest(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             Scene(config=world_path)
 
-    def test_mount_offsets_survive_resizing(self):
+    def test_gap_follows_body_margin_and_lateral_offset_survives_resizing(self):
         self.profile["collector"].update(gap=.05, lateral_offset=.03)
         scene = Scene(robot_config=self.write_profile())
         scene.targets.clear()
-        self.assertAlmostEqual(scene.collector.xmin, .30)
+        self.assertAlmostEqual(scene.collector.xmin, .35)
         self.assertAlmostEqual(scene.collector.ymin, -.145)
         scene.set_dimensions(**(scene.dimensions | {"body_length": .8}))
-        self.assertAlmostEqual(scene.collector.xmin, .45)
+        self.assertAlmostEqual(scene.collector.xmin, .50)
         self.assertAlmostEqual(scene.collector.ymax, .205)
+        scene.set_dimensions(**(scene.dimensions | {"body_margin": .15}))
+        self.assertAlmostEqual(scene.collector_gap, .15)
+        self.assertAlmostEqual(scene.collector.xmin, .55)
 
     def test_invalid_profile_never_falls_back_to_demo_sizes(self):
         profiles = []

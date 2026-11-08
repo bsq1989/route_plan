@@ -16,6 +16,7 @@
 - `sim/output/`：导出的 PNG、JSON 和临时构建产物，已被 Git 忽略。
 - `planner/`：独立的任务搜索、运动连接器、OMPL 绕行、自动演示及回归测试，包含自己的 `pyproject.toml` 和 `uv.lock`。
 - `planner/src/route_plan_planner/api.py`：业务请求与响应封装；`planner/sdk/`：纯算法 SDK 构建配置、依赖说明与 examples；`planner/tools/package_sdk.py`：固定打包入口。
+- `planner/src/route_plan_planner/stops.py`：`method="stops"` 停靠优化；`pickup_stops` 给出从 0 开始的目标位姿索引和批次 ID。此模式使用 `collection_mode="at_stop"`，到位后显式 `collect_at_stop()`，途中不删除目标；先优化拾取服务位姿数量，再优化路程。旧模式继续按运动接触消除。回放时必须传入 `pickup_stops`，不能用路径经过的多个点冒充一次停靠。
 - `docs/static-baseline.md`：静态 baseline 的验证记录与能力边界；`docs/planning-roadmap.md`：分阶段开发计划。
 - 任务规划算法通过仿真公开接口调用，不将策略代码混入显示层。根本目标是全部清除且遵守规则；`--method length` 在可行性初解基础上优化总平移路程，不要求全局最优，默认 `--method feasibility` 保留原 baseline。
 
@@ -67,9 +68,9 @@ uv run --project planner route-plan compare --seeds 0:100 --timeout 3 --output s
 | 每侧车身外扩 | 0.10 m，安全矩形为 0.70 × 0.80 m |
 | 前进、转向速度 | 0.6 m/s、1.2 rad/s，仿真动画用 |
 
-消除区尺寸已确认为横向宽 35 cm、向前深 24 cm。安装位置暂按居中紧贴车头；pose 参考点和旋转中心暂按车身中心。这些安装假设在用户提供实车信息后再更新，不自行当成已确认的测量值。
+消除区尺寸已确认为横向宽 35 cm、向前深 24 cm。消除区居中，车头到消除区的间距统一使用 `body_margin`，不另加间距参数；默认间隔 10 cm。pose 参考点和旋转中心暂按车身中心。
 
-- 车体 x 轴向前、y 轴向左。`collector.gap` 为消除区与车头的间距；`lateral_offset` 为左右偏移，正值向左。
+- 车体 x 轴向前、y 轴向左。`collector.gap` 是由 `body_margin` 推导的输出，旧输入值不用于新规则；`lateral_offset` 为左右偏移，正值向左。调整 `body_margin` 时消除区同步前移或后移，宽深不变。
 - 目前仅支持 `body_center` 参考点和旋转中心，其他值会报错。
 - 车型选择优先级：显式 `robot_config` / `--robot-config` → 场景的 `custom.robot_config` → 默认车辆文件。场景引用的相对路径以场景文件所在目录为基准。
 - 配置缺失或非法时明确报错，不回退为旧演示尺寸。
@@ -101,7 +102,7 @@ print(state["pose"], state["remaining"], state["failure"])
 - `(x, y)` 为圆心。`scene.target_diameter` / `scene.target_radius` 为统一物理尺寸，默认直径 0.10 m，来自场景的 `custom.target_diameter`，可通过 `Scene(target_diameter=...)` 覆盖。目标半径与车辆外扩距离独立，不可重复并入 `body_margin`。
 - `scene.snapshot()`：返回位姿、剩余目标、已消除目标、失败原因、场景、种子、车辆尺寸和 `target_diameter`。
 - `scene.clone()`：复制当前场景用于独立试算，不读取磁盘配置，不创建窗口；配置、目标、已消除点和轨迹不共享可变状态。
-- `scene.add_target(x, y)`、`scene.remove_nearest(x, y)`：增删圆形目标；整个圆必须在地图内，与安全轮廓接触或与其他目标圆穿透重叠时禁止添加。近重合圆心沿用去重规则。
+- `scene.add_target(x, y)`、`scene.remove_nearest(x, y)`：增删圆形目标；整个圆必须在地图内，不能接触安全轮廓。允许重叠和重合圆心，保留全部 ID。重叠连通组接触消除器后整组清除，仅相切不分组，清除前按全部成员圆检查碰撞。整批观测使用 `scene.add_targets(points)`，先验证全部成员再处理初始接触，避免依赖输入顺序。
 - `scene.reset()`：恢复当前预设及同一随机种子的初始状态；不重新读取磁盘配置。重新初始化 `Scene` 才会读取文件中的新参数。
 - `scene.set_dimensions(...)`：调整 `body_length`、`body_width`、`collector_width`、`collector_depth`、可选的 `body_margin`；非法值、越界或接触剩余点时拒绝整次更新。
 - `controller.set_goal(x, y, yaw)`：下发目标；新指令替换旧指令。非法指令抛出 `ValueError`，旧指令保留。
@@ -114,8 +115,9 @@ print(state["pose"], state["remaining"], state["failure"])
 1. 小车与目标使用同一 map 坐标系；界面 yaw 使用度，Python 目标位姿 API 使用弧度。0° 向右，90° 向上，逆时针为正。
 2. 目标位置不能处于当前车头后半平面：`(goal_x-x)*cos(yaw) + (goal_y-y)*sin(yaw) >= 0`，正侧方允许。目标与当前位置相同时可以只调整朝向。
 3. 执行顺序为原地转向目标位置 → 向前直线到达 `(x, y)` → 原地调整到最终 yaw。始终禁止倒车，不采用边走边转的模型。
-4. 默认目标为直径 10 cm 的圆形实体，按真实 map 尺寸绘制。消除区在前进和旋转时都有效，与圆接触（含相切）即消除，不要求圆心或整个圆进入，可同时消除多个目标。
+4. 默认目标为直径 10 cm 的圆形实体，按真实 map 尺寸绘制。接触模式的消除区在前进和旋转时都有效，与圆接触（含相切）即消除；`stops` 模式途中不消除，到明确服务位姿后显式清除其覆盖目标。不要求圆心或整个圆进入，可同时处理多个目标。
 5. 碰撞按车身每侧外扩后的安全矩形与目标圆求交，圆与内部或边界接触、相切都不允许。安全轮廓和消除区也不能接触地图边界。
+   正前方的外扩区同样属于碰撞区，不能作为消除区豁免。新场景 `custom.rule_version=2`；旧归档缺少该字段时按版本 1 的原安装几何回放，不能将其成绩当成新规则验证。
 6. 检查整个运动过程，不能仅检查起点、终点或显示帧。连续接触时刻用圆心轨迹与矩形的直边、圆角偏置边界解析求解；不能用再次扩大长宽的矩形替代圆角，否则角部会误报。
 7. 先被消除的目标不再触发后续碰撞；同一目标同时接触安全轮廓与消除区时，碰撞优先。
 8. 碰撞后冻结在首次接触处，取消位姿指令剩余动作，重置后才能继续。随机场景不保证可解。

@@ -120,6 +120,15 @@ class Scene:
         self.config_path = (Path(config) if config else Path(str(DEFAULT_CONFIG))).resolve()
         self.config, self.robot_config_path = load_config(self.config_path, robot_config)
         world, robot, custom = (self.config[k] for k in ("world", "robot", "custom"))
+        # Version 1 preserves the mounting geometry of archived plans.
+        self.rule_version = custom.get("rule_version", 2)
+        if type(self.rule_version) is not int or self.rule_version not in (1, 2):
+            raise ValueError("Unsupported rule_version")
+        custom["rule_version"] = self.rule_version
+        self.collection_mode = custom.get("collection_mode", "contact")
+        if self.collection_mode not in ("contact", "at_stop"):
+            raise ValueError("Unsupported collection_mode")
+        custom["collection_mode"] = self.collection_mode
         self.width, self.height = finite(world["width"]), finite(world["height"])
         if finite(world["step_time"]) <= 0:
             raise ValueError("step_time must be positive")
@@ -137,15 +146,16 @@ class Scene:
         if world.get("offset", [0, 0]) != [0, 0]:
             raise ValueError("This scene requires world.offset = [0, 0]")
         self.body = Rect(-length / 2, -width / 2, length / 2, width / 2)
-        self.collector_gap = finite(custom["collector"]["gap"])
-        self.collector_offset = finite(custom["collector"]["lateral_offset"])
-        front = length / 2 + self.collector_gap
-        self.collector = Rect(front, self.collector_offset - cw / 2,
-                              front + depth, self.collector_offset + cw / 2)
         self.body_margin = finite(custom.get("body_margin", 0) if body_margin is None else body_margin)
         if self.body_margin < 0:
             raise ValueError("Body margin must be nonnegative")
         custom["body_margin"] = self.body_margin
+        self.collector_gap = self.body_margin if self.rule_version >= 2 else finite(custom["collector"]["gap"])
+        custom["collector"]["gap"] = self.collector_gap
+        self.collector_offset = finite(custom["collector"]["lateral_offset"])
+        front = length / 2 + self.collector_gap
+        self.collector = Rect(front, self.collector_offset - cw / 2,
+                              front + depth, self.collector_offset + cw / 2)
         self.initial_pose = tuple(finite(v) for v in robot["state"])
         if len(self.initial_pose) != 3:
             raise ValueError("Robot state must contain x, y, theta")
@@ -173,6 +183,7 @@ class Scene:
         result.targets = self.targets.copy()
         result.collected = self.collected.copy()
         result.path = self.path.copy()
+        result.collection_events = self.collection_events.copy()
         return result
 
     def vertices(self, rect: Rect) -> list[tuple[float, float]]:
@@ -183,6 +194,56 @@ class Scene:
     @property
     def target_radius(self) -> float:
         return self.target_diameter / 2
+
+    @property
+    def target_groups(self) -> tuple[tuple[int, ...], ...]:
+        """Connected overlapping disks form one atomic collection task.
+
+        Keep every disk for collision checks; never shrink a group to its
+        centroid. The immutable cache can safely be shared by scene clones.
+        Tangent disks remain separate; coincident centres share a group.
+        """
+        signature = (self.target_diameter, tuple(self.targets.items()))
+        cached = getattr(self, "_target_groups_cache", None)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        parents = {key: key for key in self.targets}
+
+        def root(key):
+            while parents[key] != key:
+                parents[key] = parents[parents[key]]
+                key = parents[key]
+            return key
+
+        items = list(self.targets.items())
+        for index, (key, point) in enumerate(items):
+            for other, position in items[:index]:
+                if point == position or math.dist(point, position) < self.target_diameter - EPS:
+                    parents[root(key)] = root(other)
+        groups = {}
+        for key in self.targets:
+            groups.setdefault(root(key), []).append(key)
+        result = tuple(tuple(group) for group in groups.values())
+        self._target_groups_cache = signature, result
+        return result
+
+    def _collect_at_pose(self) -> None:
+        for group in self.target_groups:
+            if any(self.collector.intersects_circle(*self.local_point(*self.targets[key]), self.target_radius)
+                   for key in group):
+                for key in group:
+                    self.collected[key] = self.targets.pop(key)
+
+    def collect_at_stop(self) -> tuple[int, ...]:
+        """Collect only disks covered at this single pose, after collision checks."""
+        if self.failure:
+            raise ValueError("Cannot collect after a collision")
+        before = set(self.collected)
+        self.advance()
+        if self.failure:
+            raise ValueError("Cannot collect at an unsafe stop")
+        self._collect_at_pose()
+        return tuple(key for key in self.collected if key not in before)
 
     @property
     def safety_body(self) -> Rect:
@@ -217,7 +278,8 @@ class Scene:
         if margin < 0:
             raise ValueError("Body margin must be nonnegative")
         body = Rect(-length / 2, -width / 2, length / 2, width / 2)
-        front = length / 2 + self.collector_gap
+        gap = margin if self.rule_version >= 2 else self.collector_gap
+        front = length / 2 + gap
         collector = Rect(front, self.collector_offset - cw / 2,
                           front + depth, self.collector_offset + cw / 2)
         candidate = copy(self)
@@ -232,12 +294,12 @@ class Scene:
             raise ValueError("Resized body overlaps an uncollected target")
         self.body, self.collector = body, collector
         self.body_margin = margin
+        self.collector_gap = gap
         self.config["robot"]["shape"].update(length=length, width=width)
-        self.config["custom"]["collector"].update(width=cw, depth=depth)
+        self.config["custom"]["collector"].update(width=cw, depth=depth, gap=gap)
         self.config["custom"]["body_margin"] = margin
-        for key, point in list(self.targets.items()):
-            if collector.intersects_circle(*self.local_point(*point), self.target_radius):
-                self.collected[key] = self.targets.pop(key)
+        if self.collection_mode == "contact":
+            self._collect_at_pose()
 
     def reset(self, scenario: str | None = None) -> None:
         # A different footprint can make a preset invalid. Keep the previous
@@ -255,6 +317,7 @@ class Scene:
         self.collision_point: tuple[float, float] | None = None
         self.path = [self.pose[:2]]
         self._next_id = 1
+        self.collection_events = []
         if self._wall_contact(0, 0) < math.inf:
             raise ValueError("Initial robot and collector must fit strictly inside the map")
         x, y, theta = self.initial_pose
@@ -293,23 +356,30 @@ class Scene:
                 raise ValueError("Not enough space to place random targets")
 
     def add_target(self, x: float, y: float) -> None:
+        self.add_targets([(x, y)])
+
+    def add_targets(self, points) -> tuple[int, ...]:
+        """Atomically add an observed batch, then collect touching groups.
+
+        Validate every member before initial collection, independently of input
+        order. Existing collected disks are absent and do not join new groups.
+        """
         if self.failure:
             raise ValueError("Reset the scene after a collision")
-        x, y = finite(x), finite(y)
+        points = tuple((finite(x), finite(y)) for x, y in points)
         radius = self.target_radius
-        if not (radius + EPS < x < self.width - radius - EPS
-                and radius + EPS < y < self.height - radius - EPS):
-            raise ValueError("Target must be inside the map")
-        local = self.local_point(x, y)
-        if self.safety_body.intersects_circle(*local, radius):
-            raise ValueError("Cannot place a target inside the robot body")
-        if any(math.dist((x, y), p) < .025 for p in self.targets.values()):
-            return
-        if self._overlaps_target(x, y):
-            raise ValueError("Target circles must not overlap")
-        collection = self.collected if self.collector.intersects_circle(*local, radius) else self.targets
-        collection[self._next_id] = (x, y)
-        self._next_id += 1
+        for x, y in points:
+            if not (radius + EPS < x < self.width - radius - EPS
+                    and radius + EPS < y < self.height - radius - EPS):
+                raise ValueError("Target must be inside the map")
+            if self.safety_body.intersects_circle(*self.local_point(x, y), radius):
+                raise ValueError("Cannot place a target inside the robot body")
+        keys = tuple(range(self._next_id, self._next_id + len(points)))
+        self.targets.update(zip(keys, points))
+        self._next_id += len(points)
+        if self.collection_mode == "contact":
+            self._collect_at_pose()
+        return keys
 
     def _overlaps_target(self, x: float, y: float) -> bool:
         return any(math.dist((x, y), p) < self.target_diameter - EPS for p in self.targets.values())
@@ -347,23 +417,34 @@ class Scene:
             raise ValueError("Reverse motion is disabled")
         if distance and rotation:
             raise ValueError("Turn in place or move forward; execute them separately")
+        self.collection_events = []
         if self.failure:
             return
         stop = self._wall_contact(distance, rotation)
         failure = "Map boundary" if math.isfinite(stop) else None
         collision_point = None
         collections = []
-        for key, (x, y) in self.targets.items():
-            local = self.local_point(x, y)
-            body_time = self.safety_body.first_contact(*local, distance, rotation, self.target_radius)
-            collect_time = self.collector.first_contact(*local, distance, rotation, self.target_radius)
+        for group in self.target_groups:
+            contacts = []
+            for key in group:
+                local = self.local_point(*self.targets[key])
+                contacts.append((self.safety_body.first_contact(*local, distance, rotation, self.target_radius),
+                                 (self.collector.first_contact(*local, distance, rotation, self.target_radius)
+                                  if self.collection_mode == "contact" else math.inf), key))
+            body_time, _, hit = min(contacts)
+            collect_time = min(contact[1] for contact in contacts)
             if collect_time + EPS < body_time:
-                collections.append((collect_time, key))
+                collections.append((collect_time, group))
             elif body_time < stop:
-                stop, failure, collision_point = body_time, f"Body hit target #{key}", (x, y)
-        for time, key in sorted(collections):
+                stop, failure, collision_point = body_time, f"Body hit target #{hit}", self.targets[hit]
+        for time, group in sorted(collections):
             if math.isfinite(time) and time <= stop + EPS:
-                self.collected[key] = self.targets.pop(key)
+                px, py, yaw = self.pose
+                self.collection_events.append({"time": time, "target_ids": group,
+                    "pose": (px + distance * time * math.cos(yaw), py + distance * time * math.sin(yaw),
+                             normalize(yaw + rotation * time))})
+                for key in group:
+                    self.collected[key] = self.targets.pop(key)
         t = min(1.0, stop)
         x, y, theta = self.pose
         self.pose = (x + distance * t * math.cos(theta),

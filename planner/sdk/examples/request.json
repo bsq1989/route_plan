@@ -10,7 +10,7 @@
     {"id": "object-205", "x": 6.5, "y": 5.0}
   ],
   "target_diameter": 0.1,
-  "method": "length",
+  "method": "stops",
   "timeout": 3.0,
   "use_ompl": true,
   "seed": 42

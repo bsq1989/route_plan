@@ -55,6 +55,7 @@ class PlanResult:
     final: dict | None = None
     diagnostic: dict | None = None
     optimization: dict | None = None
+    pickup_stops: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)

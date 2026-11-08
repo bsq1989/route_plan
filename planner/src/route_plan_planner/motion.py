@@ -23,10 +23,14 @@ class MotionBackend(Protocol):
     def connect(self, scene: Scene, goal: Pose, deadline: float) -> Transition | None: ...
 
 
-def execute(scene: Scene, goals: list[Pose], dt: float | None = None) -> Scene:
+def execute(scene: Scene, goals: list[Pose], dt: float | None = None,
+            pickup_stops: list[dict] | None = None) -> Scene:
     """Mutate only the supplied episode. dt=None executes entire pose commands."""
     controller = PoseController(scene)
-    for goal in goals:
+    stops = {stop["goal_index"]: stop for stop in pickup_stops or []}
+    if len(stops) != len(pickup_stops or []) or any(type(i) is not int or not 0 <= i < len(goals) for i in stops):
+        raise ValueError("Invalid pickup stop goal indices")
+    for index, goal in enumerate(goals):
         if scene.failure:
             break
         controller.set_goal(*goal)
@@ -41,12 +45,17 @@ def execute(scene: Scene, goals: list[Pose], dt: float | None = None) -> Scene:
                 raise ValueError("Replay dt must be positive and finite")
             while controller.command is not None and not scene.failure:
                 controller.step(dt)
+        if not scene.failure and index in stops:
+            removed = scene.collect_at_stop()
+            if set(removed) != set(stops[index]["target_ids"]):
+                raise ValueError("Pickup stop coverage differs from the plan")
     return scene
 
 
-def replay(scene: Scene, goals: list[Pose], dt: float = .04) -> Scene:
+def replay(scene: Scene, goals: list[Pose], dt: float = .04,
+           pickup_stops: list[dict] | None = None) -> Scene:
     """Independent, frame-by-frame execution; the caller's scene is untouched."""
-    return execute(scene.clone(), goals, dt)
+    return execute(scene.clone(), goals, dt, pickup_stops)
 
 
 def _turn(scene: Scene, yaw: float, long_way: bool = False) -> Transition | None:

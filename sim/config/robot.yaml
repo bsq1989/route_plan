@@ -13,7 +13,7 @@ body:
 collector:
   width: 0.35           # 横向宽度：35 cm
   depth: 0.24           # 向前深度：24 cm
-  gap: 0.0              # 暂按紧贴车头
+  # 车头到消除区的间距由 safety.body_margin 自动确定，不单独配置。
   lateral_offset: 0.0   # 暂按左右居中，正值向车体左侧偏移
 
 safety:
