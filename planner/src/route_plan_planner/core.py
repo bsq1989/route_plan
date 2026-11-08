@@ -54,6 +54,7 @@ class PlanResult:
     reason: str | None = None
     final: dict | None = None
     diagnostic: dict | None = None
+    optimization: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -1,6 +1,6 @@
 # 静态目标消除 baseline
 
-启动时所有目标完整、准确可见，执行期间保持静态。当前实现通过任务搜索与运动连接器联合求解，并在仿真副本中完整回放后报告成功。当前优先保证全部清除及运动、安全规则；后续优化目标为满足这些约束后的总行驶路径最短。
+启动时所有目标完整、准确可见，执行期间保持静态。当前实现通过任务搜索与运动连接器联合求解，并在仿真副本中完整回放后报告成功。保留可行性 baseline，并增加路径长度优化方法；两者都首先要求全部清除及运动、安全规则。优化版在有限预算内寻找更短路线，不要求或宣称全局最优。
 
 算法实现与仿真独立。`TaskPlanner`、`MotionBackend` 接口允许替换任务搜索或运动规划方法，不把当前搜索器作为唯一技术路线。
 
@@ -32,6 +32,9 @@ uv run --project planner route-plan solve --scenario front
 route-plan solve --scenario front --show
 route-plan solve --scenario surround --show
 route-plan solve --scenario random --seed 7 --show
+
+# 在同样约束下继续优化路径长度，保留可行性初解作为保底
+route-plan solve --method length --scenario random --seed 7 --timeout 3 --show
 
 # 无窗口生成可复现记录、动画和最终截图
 MPLBACKEND=Agg route-plan solve --scenario random --seed 42 \
@@ -79,6 +82,19 @@ if result.status == "success":
     assert not final.targets and not final.failure
 ```
 
+路径长度优化方法可单独使用，也可复用已有可行性初解：
+
+```python
+from route_plan_planner import LengthPlanner
+
+options = PlannerOptions(timeout=3.0)
+a = StaticPlanner(options).plan(scene)
+b = LengthPlanner(options).plan(scene, initial=a)
+# 成功的 A 会作为保底，B 返回的路线不会更长。
+```
+
+`--method feasibility` 为默认方法；`--method length` 对应 `LengthPlanner`。优化包含完整后续动作验证的路径捷径、消除顺序 2-opt、接近位姿重建和有限宽度的候选搜索。距离按车身中心的总平移路程计算，不加入转向或耗时惩罚。只有完整清除且安全的更短方案才会替换初解；优化预算耗尽时仍返回已有可行方案，`status` 保持 `success`，具体终止原因在 `optimization` 字段中。
+
 `StaticPlanner(options, motion=..., fallback=...)` 支持注入其他连接器。接口定义见 `core.py` 和 `motion.py`。角度统一为弧度；每条下发的目标位置仍须符合车头前半平面规则，处理后方目标时先合法原地转向。
 
 结果状态包括 `success`、`invalid_input`、`budget_exhausted`、`not_found`、`replay_failed`。未成功时 `goals` 不提供可执行完整计划；`diagnostic.partial_goals` 仅用于诊断最佳试算分支，不自动执行。`remaining` 表示实际回放剩余数，未执行时保留输入数量；`best_remaining` 表示搜索曾达到的最少剩余数。
@@ -92,7 +108,12 @@ MPLBACKEND=Agg python -m unittest discover -s planner/tests -v
 # 两个固定预设 + 100 个随机场景，每个场景 3 秒搜索预算
 route-plan benchmark --seeds 0:100 --timeout 3 \
   --output sim/output/baseline/benchmark
+
+# A/B：同一场景、同一可行性初解，B 利用剩余预算继续优化
+route-plan compare --seeds 0:100 --timeout 3 --output sim/output/length-ab
 ```
+
+A/B 对比会逐例保存 A、B 的完整输入和计划，并统计清除率、路程、改进比例和耗时。A 找到首个可行方案就停止；B 复用该方案，初解耗时计入同一搜索预算。最终安全回放可能增加墙钟耗时，`elapsed` 包含验证开销。详情与实测结果见 [路径长度优化与 A/B 验证](../docs/path-length-optimization.md)。
 
 固定回归集在 `tests/fixtures/static_cases.json`，包含冻结的尺寸、地图、初始状态、预算与可行基准动作。除校验基准动作，还重新规划并独立回放；另有 OMPL 绕行、连续旋转碰撞、多个回放步长和记录重放测试。
 

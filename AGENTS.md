@@ -15,7 +15,7 @@
 - `sim/output/`：导出的 PNG、JSON 和临时构建产物，已被 Git 忽略。
 - `planner/`：独立的任务搜索、运动连接器、OMPL 绕行、自动演示及回归测试，包含自己的 `pyproject.toml` 和 `uv.lock`。
 - `docs/static-baseline.md`：静态 baseline 的验证记录与能力边界；`docs/planning-roadmap.md`：分阶段开发计划。
-- 任务规划算法通过仿真公开接口调用，不将策略代码混入显示层。根本目标是全部清除且遵守规则，后续优化目标是总行驶路径最短。
+- 任务规划算法通过仿真公开接口调用，不将策略代码混入显示层。根本目标是全部清除且遵守规则；`--method length` 在可行性初解基础上优化总平移路程，不要求全局最优，默认 `--method feasibility` 保留原 baseline。
 
 更完整的交互说明见 `sim/README.md`。
 
@@ -44,6 +44,10 @@ uv run --project sim python -m unittest discover -s sim/tests -v
 # 静态自动清除及规划器测试
 uv run --project planner route-plan solve --scenario random --seed 42 --show
 uv run --project planner python -m unittest discover -s planner/tests -v
+
+# 路径长度优化和同场景 A/B
+uv run --project planner route-plan solve --method length --scenario random --seed 42 --timeout 3 --show
+uv run --project planner route-plan compare --seeds 0:100 --timeout 3 --output sim/output/length-ab
 ```
 
 也可使用仓库 `environment.yml` 创建独立 Conda `route-plan` 环境，再从根目录执行 `python -m pip install -e ./sim -e ./planner`。具体命令见 `planner/README.md`。

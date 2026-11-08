@@ -98,6 +98,49 @@ def save_snapshot(scene: Scene, output: Path):
         plt.close(fig)
 
 
+def save_comparison(scene: Scene, a_goals, b_goals, output: Path):
+    """Compare two fully replayed routes on the same static observation."""
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon
+    from route_plan_sim.app import configure_chinese_font
+    from .motion import path_length, replay
+
+    configure_chinese_font()
+    a, b = replay(scene, a_goals), replay(scene, b_goals)
+    if a.failure or a.targets or b.failure or b.targets:
+        raise ValueError("Both comparison paths must clear all targets without collision")
+    lengths = path_length(scene.pose, a_goals), path_length(scene.pose, b_goals)
+    saving = 1 - lengths[1] / lengths[0] if lengths[0] else 0.
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), dpi=110)
+    fig.patch.set_facecolor("#f1f4f9")
+    for ax, final, label, color, length in zip(
+            axes, (a, b), ("A  可行性 baseline", "B  路径长度优化"), ("#3568e8", "#159477"), lengths):
+        ax.set(xlim=(0, scene.width), ylim=(0, scene.height), aspect="equal",
+               xlabel="横向位置 / 米", ylabel="纵向位置 / 米")
+        ax.grid(alpha=.15)
+        if scene.targets:
+            tx, ty = zip(*scene.targets.values())
+            ax.scatter(tx, ty, s=28, color="#f5a623", edgecolors="#b77915", linewidths=.5, zorder=3)
+        px, py = zip(*final.path)
+        ax.plot(px, py, color=color, lw=1.7, zorder=2)
+        ax.scatter(*scene.pose[:2], s=65, marker="o", color=color, zorder=4)
+        ax.annotate("起点", scene.pose[:2], xytext=(6, 6), textcoords="offset points", fontsize=9)
+        ax.add_patch(Polygon(final.vertices(final.body), color=color, alpha=.85, zorder=5))
+        ax.add_patch(Polygon(final.vertices(final.safety_body), fill=False, edgecolor="#c08a2f", linestyle="--", zorder=4))
+        ax.add_patch(Polygon(final.vertices(final.collector), color="#10b981", alpha=.35, zorder=4))
+        ax.set_title(f"{label}\n总路程 {length:.2f} 米 · 剩余 0", fontsize=13, pad=12)
+    fig.suptitle(f"随机种子 {scene.seed} · 同一组 {len(scene.targets)} 个目标 · 路程缩短 {saving:.1%}", fontsize=15)
+    fig.text(.5, .025, "橙点为初始目标位置，两条路线均已全部清除；按实际仿真规则独立回放，无碰撞。",
+             ha="center", fontsize=10, color="#52627b")
+    fig.tight_layout(rect=(0, .09, 1, .93))
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fig.savefig(output, dpi=130)
+    finally:
+        plt.close(fig)
+
+
 def show(scene: Scene, goals, display=True):
     """Reuse IR-SIM's viewer; manual edits cancel the queued static plan."""
     from route_plan_sim.app import Viewer
