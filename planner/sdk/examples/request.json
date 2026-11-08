@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "request_id": "pickup-demo-001",
+  "frame_id": "map",
+  "width": 12.0,
+  "height": 9.0,
+  "pose": [3.0, 4.5, 0.0],
+  "targets": [
+    {"id": "object-101", "x": 5.0, "y": 4.5},
+    {"id": "object-205", "x": 6.5, "y": 5.0}
+  ],
+  "target_diameter": 0.1,
+  "method": "length",
+  "timeout": 3.0,
+  "use_ompl": true,
+  "seed": 42
+}

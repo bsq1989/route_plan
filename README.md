@@ -9,6 +9,8 @@
 - [`planner/`](planner/README.md)：静态完整观测的自动清除 baseline，包含任务搜索、OMPL 绕行、自动演示与回放验证。
 - [现行技术方案](docs/technical-design.md)：v0.2.0 的系统结构、任务搜索、运动规划、长度优化与验证机制。
 - [圆形目标规划适配](docs/circle-target-adaptation.md)：直径 10 cm 的接触规则、接近动作与十组静态回归。
+- [系统输入输出与集成接口](docs/integration-io.md)：输入字段、单位、规划输出、执行语义及最小对接示例。
+- [纯算法 Python SDK](docs/python-sdk.md)：可独立安装的源码包、wheel、依赖清单和跨工程调用 example。
 - [目标消除规划与分阶段验证计划](docs/planning-roadmap.md)：从静态完整准确观测开始，逐步验证车头方向加点和随机加点。
 - [第一阶段静态规划 baseline](docs/static-baseline.md)：当前实现范围、验证结果与能力边界。
 - [路径长度优化与 A/B 验证](docs/path-length-optimization.md)：在全部清除及安全约束下优化路程，对比可行性 baseline。

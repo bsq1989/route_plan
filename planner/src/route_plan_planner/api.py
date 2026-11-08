@@ -1,0 +1,252 @@
+"""Public, headless request/response API, independent of viewer configuration."""
+
+from copy import deepcopy
+from dataclasses import asdict, dataclass, field, fields
+import math
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import time
+from typing import Mapping
+
+import yaml
+
+from route_plan_sim import Scene
+from route_plan_sim.config import default_robot_config
+from route_plan_sim.scene import EPS, normalize
+
+from .core import PlannerOptions, StaticPlanner
+from .length import LengthPlanner
+from .motion import execute
+from .records import describe_scene
+
+TargetId = str | int
+Pose = tuple[float, float, float]
+
+
+def _number(value, name):
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number")
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(f"{name} must be a finite number") from error
+    if not math.isfinite(result):
+        raise ValueError(f"{name} must be a finite number")
+    return result
+
+
+@dataclass(frozen=True)
+class Target:
+    id: TargetId
+    x: float
+    y: float
+
+    def __post_init__(self):
+        if (isinstance(self.id, bool) or not isinstance(self.id, (str, int))
+                or isinstance(self.id, str) and not self.id.strip()):
+            raise ValueError("Target id must be an integer or a nonempty string")
+        object.__setattr__(self, "x", _number(self.x, "target.x"))
+        object.__setattr__(self, "y", _number(self.y, "target.y"))
+
+
+@dataclass(frozen=True)
+class PlanningRequest:
+    width: float
+    height: float
+    pose: Pose
+    targets: tuple[Target, ...]
+    target_diameter: float = .10
+    method: str = "length"
+    timeout: float = 3.
+    use_ompl: bool = True
+    seed: int = 42
+    robot_config: dict | str | Path | None = None
+    frame_id: str = "map"
+    request_id: str | None = None
+    schema_version: int = 1
+
+    def __post_init__(self):
+        for name in ("width", "height", "timeout", "target_diameter"):
+            value = _number(getattr(self, name), name)
+            if value < 0 or value == 0 and name != "target_diameter":
+                raise ValueError(f"{name} must be {'nonnegative' if name == 'target_diameter' else 'positive'}")
+            object.__setattr__(self, name, value)
+        if self.target_diameter >= min(self.width, self.height):
+            raise ValueError("Target diameter must be smaller than the map")
+        try:
+            pose = tuple(_number(value, "pose") for value in self.pose)
+        except TypeError as error:
+            raise ValueError("pose must contain x, y, yaw in radians") from error
+        if len(pose) != 3:
+            raise ValueError("pose must contain x, y, yaw in radians")
+        object.__setattr__(self, "pose", (pose[0], pose[1], normalize(pose[2])))
+        if self.method not in ("feasibility", "length"):
+            raise ValueError("method must be feasibility or length")
+        if not isinstance(self.use_ompl, bool):
+            raise ValueError("use_ompl must be boolean")
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int) or not 0 <= self.seed < 2**32:
+            raise ValueError("seed must be an integer in [0, 2**32)")
+        if type(self.schema_version) is not int or self.schema_version != 1:
+            raise ValueError("Unsupported request schema_version")
+        if not isinstance(self.frame_id, str) or not self.frame_id.strip():
+            raise ValueError("frame_id must be a nonempty string")
+        if self.request_id is not None and not isinstance(self.request_id, str):
+            raise ValueError("request_id must be a string or None")
+        try:
+            targets = tuple(item if isinstance(item, Target) else Target(**item) for item in self.targets)
+        except (TypeError, KeyError) as error:
+            raise ValueError("targets must contain Target objects or {id, x, y} mappings") from error
+        if len({item.id for item in targets}) != len(targets):
+            raise ValueError("Target ids must be unique")
+        # Validate the entire observed snapshot before initial tool contacts
+        # are consumed. Otherwise two overlapping objects inside the tool
+        # could both disappear during sequential Scene.add_target calls.
+        for index, target in enumerate(targets):
+            for other in targets[:index]:
+                distance = math.hypot(target.x - other.x, target.y - other.y)
+                if distance < .025:
+                    raise ValueError("Target centres must not duplicate or nearly coincide")
+                if distance < self.target_diameter - EPS:
+                    raise ValueError("Target circles must not overlap")
+        object.__setattr__(self, "targets", targets)
+        if isinstance(self.robot_config, Mapping):
+            object.__setattr__(self, "robot_config", deepcopy(dict(self.robot_config)))
+        elif self.robot_config is not None and not isinstance(self.robot_config, (str, Path)):
+            raise ValueError("robot_config must be a profile mapping, YAML path, or None")
+
+    @classmethod
+    def from_dict(cls, payload: Mapping):
+        if not isinstance(payload, Mapping):
+            raise ValueError("Request must be a mapping")
+        unknown = set(payload) - {item.name for item in fields(cls)}
+        if unknown:
+            raise ValueError(f"Unknown request fields: {sorted(map(str, unknown))}")
+        try:
+            return cls(**deepcopy(dict(payload)))
+        except TypeError as error:
+            raise ValueError(f"Invalid request: {error}") from error
+
+    def to_dict(self):
+        result = asdict(self)
+        result["pose"] = list(self.pose)
+        result["targets"] = [asdict(target) for target in self.targets]
+        if isinstance(self.robot_config, Path):
+            result["robot_config"] = str(self.robot_config)
+        return result
+
+
+@dataclass(frozen=True)
+class PlanStep:
+    goal: Pose
+    expected_collected_ids: tuple[TargetId, ...] = ()
+
+
+@dataclass
+class PlanningResponse:
+    status: str
+    frame_id: str
+    request_id: str | None
+    goals: list[Pose] = field(default_factory=list)
+    steps: list[PlanStep] = field(default_factory=list)
+    length: float | None = None
+    elapsed: float = 0.
+    final_pose: Pose | None = None
+    initially_collected_ids: list[TargetId] = field(default_factory=list)
+    expected_collected_ids: list[TargetId] = field(default_factory=list)
+    remaining_ids: list[TargetId] = field(default_factory=list)
+    reason: str | None = None
+    optimization: dict | None = None
+    metrics: dict = field(default_factory=dict)
+    resolved_request: dict = field(default_factory=dict)
+    schema_version: int = 1
+
+    @property
+    def success(self):
+        return self.status == "success"
+
+    def to_dict(self):
+        # Return JSON-native containers and a snapshot rather than shared lists.
+        result = asdict(self)
+        result["success"] = self.success
+        result["goals"] = [list(goal) for goal in self.goals]
+        result["steps"] = [{"goal": list(step.goal), "expected_collected_ids": list(step.expected_collected_ids)}
+                           for step in self.steps]
+        result["final_pose"] = list(self.final_pose) if self.final_pose is not None else None
+        return result
+
+
+def _scene(request):
+    profile = request.robot_config
+    if not isinstance(profile, Mapping):
+        path = Path(profile).expanduser() if profile is not None else default_robot_config()
+        try:
+            profile = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as error:
+            raise ValueError(f"Invalid robot_config YAML: {error}") from error
+    profile = deepcopy(profile)
+    world = {"world": {"width": request.width, "height": request.height, "step_time": .04},
+             "robot": {"state": list(request.pose)},
+             "custom": {"random_count": 0, "target_diameter": request.target_diameter}}
+    with TemporaryDirectory(prefix="route-plan-input-") as directory:
+        world_path, robot_path = Path(directory) / "world.yaml", Path(directory) / "robot.yaml"
+        world_path.write_text(yaml.safe_dump(world), encoding="utf-8")
+        try:
+            robot_path.write_text(yaml.safe_dump(profile), encoding="utf-8")
+        except yaml.YAMLError as error:
+            raise ValueError(f"Invalid robot_config: {error}") from error
+        scene = Scene(config=world_path, robot_config=robot_path, scenario="random", seed=request.seed)
+    id_map = {}
+    for index, target in enumerate(request.targets, 1):
+        count = len(scene.targets) + len(scene.collected)
+        scene.add_target(target.x, target.y)
+        if len(scene.targets) + len(scene.collected) != count + 1:
+            raise ValueError(f"Target {target.id!r} duplicates another target centre")
+        id_map[index] = target.id
+    return scene, id_map, describe_scene(scene)["vehicle_config"]
+
+
+def plan(request: PlanningRequest | Mapping) -> PlanningResponse:
+    """Plan a complete static task. This function sends no hardware commands.
+
+    Invalid input/configuration raises ValueError/OSError. Search failures return
+    a response without executable goals. Each call owns a separate planner.
+    """
+    started = time.monotonic()
+    request = request if isinstance(request, PlanningRequest) else PlanningRequest.from_dict(request)
+    scene, id_map, profile = _scene(request)
+    initially_collected = [id_map[key] for key in scene.collected]
+    options = PlannerOptions(timeout=request.timeout, ompl=request.use_ompl, seed=request.seed)
+    result = (LengthPlanner(options) if request.method == "length" else StaticPlanner(options)).plan(scene)
+    resolved = request.to_dict()
+    resolved["robot_config"] = profile
+    response = PlanningResponse(status=result.status, frame_id=request.frame_id, request_id=request.request_id,
+                                reason=result.reason, remaining_ids=[id_map[key] for key in scene.targets],
+                                initially_collected_ids=initially_collected, resolved_request=resolved,
+                                expected_collected_ids=list(initially_collected),
+                                optimization=deepcopy(result.optimization),
+                                metrics={"expanded": result.expanded, "trials": result.trials,
+                                         "backtracks": result.backtracks, "ompl_calls": result.ompl_calls,
+                                         "best_remaining": result.best_remaining,
+                                         "planner_elapsed": result.elapsed})
+    if result.status == "success":
+        trace = scene.clone()
+        steps = []
+        try:
+            for goal in result.goals:
+                before = set(trace.collected)
+                execute(trace, [goal])
+                steps.append(PlanStep(tuple(goal), tuple(id_map[key] for key in trace.collected if key not in before)))
+        except ValueError as error:
+            response.status, response.reason = "replay_failed", str(error)
+        else:
+            if trace.failure or trace.targets:
+                response.status, response.reason = "replay_failed", trace.failure or "Incomplete final plan"
+            else:
+                response.goals = [tuple(goal) for goal in result.goals]
+                response.steps = steps
+                response.length = result.length
+                response.final_pose = tuple(trace.pose)
+                response.expected_collected_ids = [id_map[key] for key in trace.collected]
+                response.remaining_ids = []
+    response.elapsed = time.monotonic() - started
+    return response

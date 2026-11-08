@@ -1,0 +1,113 @@
+{
+  "world_config": {
+    "world": {
+      "width": 12,
+      "height": 9,
+      "step_time": 0.04,
+      "sample_time": 0.04,
+      "control_mode": "auto",
+      "step_mode": "external",
+      "collision_mode": "unobstructed",
+      "plot": {
+        "figure_pixels": [
+          1320,
+          850
+        ],
+        "show_title": false
+      }
+    },
+    "gui": {
+      "keyboard": {
+        "backend": "mpl"
+      }
+    },
+    "robot": {
+      "state": [
+        3,
+        4.5,
+        0
+      ],
+      "color": "#2563eb",
+      "plot": {
+        "show_goal": false,
+        "show_text": false,
+        "show_arrow": true,
+        "show_trajectory": false
+      },
+      "kinematics": {
+        "name": "diff"
+      },
+      "shape": {
+        "name": "rectangle",
+        "length": 0.5,
+        "width": 0.6
+      }
+    },
+    "custom": {
+      "target_diameter": 0.1,
+      "seed": 42,
+      "random_count": 40,
+      "collector": {
+        "width": 0.35,
+        "depth": 0.24,
+        "gap": 0.0,
+        "lateral_offset": 0.0
+      },
+      "body_margin": 0.1,
+      "forward_speed": 0.6,
+      "angular_speed": 1.2
+    }
+  },
+  "vehicle_config": {
+    "version": 1,
+    "units": "m",
+    "body": {
+      "length": 0.5,
+      "width": 0.6,
+      "pose_reference": "body_center",
+      "rotation_center": "body_center"
+    },
+    "collector": {
+      "width": 0.35,
+      "depth": 0.24,
+      "gap": 0.0,
+      "lateral_offset": 0.0
+    },
+    "safety": {
+      "body_margin": 0.1
+    },
+    "motion": {
+      "forward_speed": 0.6,
+      "angular_speed": 1.2
+    }
+  },
+  "state": {
+    "pose": [
+      3.0,
+      4.5,
+      0.0
+    ],
+    "remaining": {
+      "101": [
+        5.0,
+        4.5
+      ],
+      "205": [
+        6.5,
+        5.0
+      ]
+    },
+    "collected": {},
+    "failure": null,
+    "scenario": "random",
+    "seed": 42,
+    "dimensions": {
+      "body_length": 0.5,
+      "body_width": 0.6,
+      "collector_width": 0.35,
+      "collector_depth": 0.24,
+      "body_margin": 0.1
+    },
+    "target_diameter": 0.1
+  }
+}

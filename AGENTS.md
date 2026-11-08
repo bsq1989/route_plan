@@ -15,6 +15,7 @@
 - `sim/tests/`：配置、规则、控制器和离屏界面测试。
 - `sim/output/`：导出的 PNG、JSON 和临时构建产物，已被 Git 忽略。
 - `planner/`：独立的任务搜索、运动连接器、OMPL 绕行、自动演示及回归测试，包含自己的 `pyproject.toml` 和 `uv.lock`。
+- `planner/src/route_plan_planner/api.py`：业务请求与响应封装；`planner/sdk/`：纯算法 SDK 构建配置、依赖说明与 examples；`planner/tools/package_sdk.py`：固定打包入口。
 - `docs/static-baseline.md`：静态 baseline 的验证记录与能力边界；`docs/planning-roadmap.md`：分阶段开发计划。
 - 任务规划算法通过仿真公开接口调用，不将策略代码混入显示层。根本目标是全部清除且遵守规则；`--method length` 在可行性初解基础上优化总平移路程，不要求全局最优，默认 `--method feasibility` 保留原 baseline。
 
@@ -128,5 +129,7 @@ print(state["pose"], state["remaining"], state["failure"])
 目标点由 `Scene` 管理并叠加绘制，未放进 IR-SIM 普通障碍物列表；IR-SIM 使用 external step 模式同步位姿。后续接规划器或 Nav2 时需要显式读取剩余点，不假定代价地图已经更新。
 
 保持仿真和算法目录独立，不提交 `.venv/`、缓存、截图或其他 `sim/output/` 生成物。
+
+纯算法 SDK 使用 `python planner/tools/package_sdk.py` 打包，默认输出 `sim/output/sdk/dist/`，不会重复跑完整回归；需要独立安装验证时加 `--verify`。SDK 不携带显示模块或 IR-SIM 依赖，只复制规划必需的几何内核到私有命名空间。维护原源文件和 `planner/sdk/`，不直接修改生成副本。
 
 规划导出与回放必须保留目标直径。旧归档记录若没有目标尺寸字段，按其原来的点模型（直径 0）恢复，不能把旧点模型的成功轨迹或统计直接当成 10 cm 圆模型的验证。旧点解析测试可显式设置 `target_diameter=0`，正常初始化默认使用圆形实体。
