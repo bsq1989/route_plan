@@ -6,6 +6,8 @@
 
 算法实现与仿真独立。`TaskPlanner`、`MotionBackend` 接口允许替换任务搜索或运动规划方法，不把当前搜索器作为唯一技术路线。
 
+当前默认为直径 10 cm 的圆形目标，消除区宽 35 cm、深 24 cm。规划按圆与矩形接触规则试算，支持圆边及圆角接触的原地消除；新模型回归见 [圆形目标适配说明](../docs/circle-target-adaptation.md)。
+
 ## 环境
 
 从仓库根目录操作。可以使用独立 Conda 环境：
@@ -113,6 +115,10 @@ route-plan benchmark --seeds 0:100 --timeout 3 \
 
 # A/B：同一场景、同一可行性初解，B 利用剩余预算继续优化
 route-plan compare --seeds 0:100 --timeout 3 --output sim/output/length-ab
+
+# 精确选择十个随机种子，不额外加入固定预设
+route-plan compare --seed-list 41,57,28,38,49,70,1,97,85,54 --random-only \
+  --timeout 3 --output sim/output/circle-regression-10
 ```
 
 A/B 对比会逐例保存 A、B 的完整输入和计划，并统计清除率、路程、改进比例和耗时。A 找到首个可行方案就停止；B 复用该方案，初解耗时计入同一搜索预算。最终安全回放可能增加墙钟耗时，`elapsed` 包含验证开销。详情与实测结果见 [路径长度优化与 A/B 验证](../docs/path-length-optimization.md)。

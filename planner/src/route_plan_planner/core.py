@@ -6,7 +6,7 @@ import time
 from typing import Iterator, Protocol
 
 from route_plan_sim import Scene
-from route_plan_sim.scene import normalize
+from route_plan_sim.scene import EPS, normalize
 
 from .motion import (DirectMotion, MotionBackend, Pose, Transition, compact_goals,
                      path_length, replay)
@@ -93,6 +93,7 @@ class StaticPlanner:
 
     def _candidates(self, scene: Scene) -> list[Pose]:
         candidates = []
+        pickup_reach = max(math.hypot(x, y) for x, y in scene.collector.corners) + scene.target_radius
         # Disk centres may be outside the tool but must clear the safety body.
         near = max(scene.collector.xmin - scene.target_radius,
                    scene.safety_body.xmax + scene.target_radius) + .015
@@ -103,6 +104,17 @@ class StaticPlanner:
             bearing = math.atan2(ty - scene.pose[1], tx - scene.pose[0])
             angles = [bearing, scene.pose[2]] + [i * math.tau / self.options.headings
                                                for i in range(self.options.headings)]
+            dx, dy = tx - scene.pose[0], ty - scene.pose[1]
+            if math.hypot(dx, dy) <= pickup_reach + EPS:
+                # Circle contact can occur at a rounded collector corner. Add
+                # corner-aligned yaws as well as the ordinary heading samples.
+                pickup_angles = angles + [bearing - math.atan2(cy, cx)
+                                          for cx, cy in scene.collector.corners]
+                for angle in pickup_angles:
+                    c, s = math.cos(angle), math.sin(angle)
+                    if scene.collector.intersects_circle(c * dx + s * dy, -s * dx + c * dy,
+                                                         scene.target_radius):
+                        candidates.append((*scene.pose[:2], normalize(angle)))
             for angle in angles:
                 c, s = math.cos(angle), math.sin(angle)
                 for depth in depths:

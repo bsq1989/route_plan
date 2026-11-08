@@ -21,11 +21,32 @@ def _options(args):
                           seed=args.planner_seed)
 
 
+def _cases(args):
+    if args.seed_list is not None:
+        seeds = [int(value.strip()) for value in args.seed_list.split(",")]
+        if not seeds or min(seeds) < 0 or len(set(seeds)) != len(seeds):
+            raise ValueError("seed-list must contain distinct nonnegative integers")
+    else:
+        start, stop = map(int, args.seeds.split(":"))
+        if not 0 <= start < stop:
+            raise ValueError("seeds must be a nonempty, nonnegative START:STOP range")
+        seeds = list(range(start, stop))
+    presets = [] if args.random_only else [("front", 42), ("surround", 42)]
+    return presets + [("random", seed) for seed in seeds]
+
+
+def _geometry(scene):
+    return {"target_shape": "circle" if scene.target_diameter > 0 else "point",
+            "target_diameter": scene.target_diameter, "dimensions": scene.dimensions,
+            "collector_gap": scene.collector_gap, "collector_lateral_offset": scene.collector_offset}
+
+
 def _plan_record(scene, options, method="feasibility"):
     initial = describe_scene(scene)
     result = (LengthPlanner(options) if method == "length" else StaticPlanner(options)).plan(scene)
     payload = {"schema_version": 1, "planner": "length-beam-v1" if method == "length" else "static-dfs-v1", "python": platform.python_version(),
-               "options": asdict(options), "initial": initial, "result": result.to_dict()}
+               "options": asdict(options), "geometry": _geometry(scene),
+               "initial": initial, "result": result.to_dict()}
     if method == "length":
         payload["length_options"] = asdict(LengthOptions())
     return result, payload
@@ -80,23 +101,22 @@ def _replay(args):
 
 
 def _benchmark(args):
-    start, stop = map(int, args.seeds.split(":"))
-    if not 0 <= start < stop:
-        raise ValueError("seeds must be a nonempty, nonnegative START:STOP range")
+    cases = _cases(args)
     options = _options(args)
     rows = []
     args.output.mkdir(parents=True, exist_ok=True)
-    for scenario, seeds in (("front", [42]), ("surround", [42]), ("random", range(start, stop))):
-        for seed in seeds:
-            scene = Scene(scenario=scenario, seed=seed, robot_config=args.robot_config)
-            result, payload = _plan_record(scene, options, args.method)
-            name = f"{scenario}-{seed}"
-            write_json(args.output / f"{name}.json", payload)
-            row = {"case": name, "initial_count": len(scene.targets),
-                   **{key: value for key, value in result.to_dict().items() if key not in ("goals", "final")}}
-            rows.append(row)
-            print(f"{name}: {result.status}, {result.elapsed:.3f}s, best_remaining={result.best_remaining}", flush=True)
-    summary = {"planner": "length-beam-v1" if args.method == "length" else "static-dfs-v1", "options": asdict(options), "cases": rows,
+    for scenario, seed in cases:
+        scene = Scene(scenario=scenario, seed=seed, robot_config=args.robot_config)
+        result, payload = _plan_record(scene, options, args.method)
+        name = f"{scenario}-{seed}"
+        write_json(args.output / f"{name}.json", payload)
+        row = {"case": name, "seed": seed, "scenario": scenario,
+               "target_diameter": scene.target_diameter, "initial_count": len(scene.targets),
+               **{key: value for key, value in result.to_dict().items() if key not in ("goals", "final")}}
+        rows.append(row)
+        print(f"{name}: {result.status}, {result.elapsed:.3f}s, best_remaining={result.best_remaining}", flush=True)
+    summary = {"planner": "length-beam-v1" if args.method == "length" else "static-dfs-v1", "options": asdict(options),
+               "geometry": _geometry(scene), "selected_cases": cases, "cases": rows,
                "total": len(rows), "success": sum(row["status"] == "success" for row in rows)}
     write_json(args.output / "summary.json", summary)
     print(f"success {summary['success']}/{summary['total']}; {args.output / 'summary.json'}")
@@ -104,40 +124,39 @@ def _benchmark(args):
 
 
 def _compare(args):
-    start, stop = map(int, args.seeds.split(":"))
-    if not 0 <= start < stop:
-        raise ValueError("seeds must be a nonempty, nonnegative START:STOP range")
+    cases = _cases(args)
     options = _options(args)
     args.output.mkdir(parents=True, exist_ok=True)
     rows = []
-    for scenario, seeds in (("front", [42]), ("surround", [42]), ("random", range(start, stop))):
-        for seed in seeds:
-            scene = Scene(scenario=scenario, seed=seed, robot_config=args.robot_config)
-            a, record_a = _plan_record(scene, options)
-            # Share exactly the same feasible incumbent, not a second randomized
-            # solve. Its elapsed time consumes B's overall search allowance.
-            b = LengthPlanner(options).plan(scene, initial=a)
-            record_b = {**record_a, "planner": "length-beam-v1",
-                        "length_options": asdict(LengthOptions()), "result": b.to_dict()}
-            name = f"{scenario}-{seed}"
-            write_json(args.output / f"A-{name}.json", record_a)
-            write_json(args.output / f"B-{name}.json", record_b)
-            paired = a.status == b.status == "success"
-            row = {"case": name, "initial_count": len(scene.targets),
-                   "a_status": a.status, "b_status": b.status,
-                   "a_length": a.length if a.status == "success" else None,
-                   "b_length": b.length if b.status == "success" else None,
-                   "a_elapsed": a.elapsed, "b_elapsed": b.elapsed,
-                   "saved_length": a.length - b.length if paired else None,
-                   "saved_fraction": (1 - b.length / a.length) if paired and a.length > 0 else 0. if paired else None}
-            rows.append(row)
-            print(f"{name}: A={a.status} {a.length:.2f}m; B={b.status} {b.length:.2f}m; "
-                  f"saved={row['saved_fraction']:.1%}" if paired else f"{name}: A={a.status}; B={b.status}", flush=True)
+    for scenario, seed in cases:
+        scene = Scene(scenario=scenario, seed=seed, robot_config=args.robot_config)
+        a, record_a = _plan_record(scene, options)
+        # Share exactly the same feasible incumbent, not a second randomized
+        # solve. Its elapsed time consumes B's overall search allowance.
+        b = LengthPlanner(options).plan(scene, initial=a)
+        record_b = {**record_a, "planner": "length-beam-v1",
+                    "length_options": asdict(LengthOptions()), "result": b.to_dict()}
+        name = f"{scenario}-{seed}"
+        write_json(args.output / f"A-{name}.json", record_a)
+        write_json(args.output / f"B-{name}.json", record_b)
+        paired = a.status == b.status == "success"
+        row = {"case": name, "seed": seed, "scenario": scenario,
+               "target_diameter": scene.target_diameter, "initial_count": len(scene.targets),
+               "a_status": a.status, "b_status": b.status,
+               "a_length": a.length if a.status == "success" else None,
+               "b_length": b.length if b.status == "success" else None,
+               "a_elapsed": a.elapsed, "b_elapsed": b.elapsed,
+               "saved_length": a.length - b.length if paired else None,
+               "saved_fraction": (1 - b.length / a.length) if paired and a.length > 0 else 0. if paired else None}
+        rows.append(row)
+        print(f"{name}: A={a.status} {a.length:.2f}m; B={b.status} {b.length:.2f}m; "
+              f"saved={row['saved_fraction']:.1%}" if paired else f"{name}: A={a.status}; B={b.status}", flush=True)
     paired = [row for row in rows if row["saved_length"] is not None]
     total_a = sum(row["a_length"] for row in paired)
     total_b = sum(row["b_length"] for row in paired)
     summary = {"schema_version": 1, "a_method": "static-dfs-v1", "b_method": "length-beam-v1",
                "options": asdict(options), "length_options": asdict(LengthOptions()),
+               "geometry": _geometry(scene), "selected_cases": cases,
                "shared_feasible_seed": True, "timeout_scope": "seed plus optimization search; final replay may add time",
                "total": len(rows), "a_success": sum(row["a_status"] == "success" for row in rows),
                "b_success": sum(row["b_status"] == "success" for row in rows), "paired_success": len(paired),
@@ -165,11 +184,14 @@ def main(argv=None):
     play = commands.add_parser("replay", help="按保存的尺寸和动作回放，不重新搜索")
     play.add_argument("record", type=Path)
     batch = commands.add_parser("benchmark", help="运行两个预设及一批随机种子，逐个保存复现记录")
-    batch.add_argument("--seeds", default="0:100", help="START:STOP，右端不含")
     batch.add_argument("--output", type=Path, default=Path("sim/output/baseline/benchmark"))
     compare = commands.add_parser("compare", help="同场景同初解对比可行性 A 与路径长度优化 B")
-    compare.add_argument("--seeds", default="0:100")
     compare.add_argument("--output", type=Path, default=Path("sim/output/length-ab"))
+    for command in (batch, compare):
+        selection = command.add_mutually_exclusive_group()
+        selection.add_argument("--seeds", default="0:100", help="START:STOP，右端不含")
+        selection.add_argument("--seed-list", help="指定随机种子列表，例如 41,57,28")
+        command.add_argument("--random-only", action="store_true", help="仅运行选定随机场景，不额外加入两个固定预设")
     for command in (solve, batch, compare):
         command.add_argument("--robot-config", type=Path)
         command.add_argument("--timeout", type=float, default=30.)

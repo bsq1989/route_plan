@@ -1,0 +1,455 @@
+{
+  "schema_version": 1,
+  "a_method": "static-dfs-v1",
+  "b_method": "length-beam-v1",
+  "options": {
+    "timeout": 3.0,
+    "max_expansions": 2000,
+    "max_trials": 30000,
+    "headings": 24,
+    "relocation_steps": [
+      0.4,
+      0.8,
+      1.4
+    ],
+    "max_relocations": 3,
+    "ompl": true,
+    "ompl_seconds": 0.4,
+    "ompl_attempts": 4,
+    "seed": 42
+  },
+  "length_options": {
+    "beam_width": 4,
+    "branching": 6,
+    "trials_per_node": 64,
+    "variants_per_collection": 2,
+    "shortcut_trials": 40,
+    "route_trials": 120
+  },
+  "geometry": {
+    "target_shape": "circle",
+    "target_diameter": 0.1,
+    "dimensions": {
+      "body_length": 0.5,
+      "body_width": 0.6,
+      "collector_width": 0.35,
+      "collector_depth": 0.24,
+      "body_margin": 0.1
+    },
+    "collector_gap": 0.0,
+    "collector_lateral_offset": 0.0
+  },
+  "selected_cases": [
+    [
+      "random",
+      41
+    ],
+    [
+      "random",
+      57
+    ],
+    [
+      "random",
+      28
+    ],
+    [
+      "random",
+      38
+    ],
+    [
+      "random",
+      49
+    ],
+    [
+      "random",
+      70
+    ],
+    [
+      "random",
+      1
+    ],
+    [
+      "random",
+      97
+    ],
+    [
+      "random",
+      85
+    ],
+    [
+      "random",
+      54
+    ]
+  ],
+  "shared_feasible_seed": true,
+  "timeout_scope": "seed plus optimization search; final replay may add time",
+  "total": 10,
+  "a_success": 10,
+  "b_success": 10,
+  "paired_success": 10,
+  "improved": 6,
+  "unchanged": 4,
+  "worse": 0,
+  "a_total_length": 478.1109151116898,
+  "b_total_length": 464.97960562936925,
+  "total_saved_fraction": 0.02746498577480283,
+  "cases": [
+    {
+      "case": "random-41",
+      "seed": 41,
+      "scenario": "random",
+      "target_diameter": 0.1,
+      "initial_count": 40,
+      "a_status": "success",
+      "b_status": "success",
+      "a_length": 45.57319558529788,
+      "b_length": 45.288540628213546,
+      "a_elapsed": 0.34880695887841284,
+      "b_elapsed": 3.4178983338642865,
+      "saved_length": 0.2846549570843351,
+      "saved_fraction": 0.006246104830449184
+    },
+    {
+      "case": "random-57",
+      "seed": 57,
+      "scenario": "random",
+      "target_diameter": 0.1,
+      "initial_count": 40,
+      "a_status": "success",
+      "b_status": "success",
+      "a_length": 50.997897578543004,
+      "b_length": 47.06177261272352,
+      "a_elapsed": 0.49587674997746944,
+      "b_elapsed": 3.402040916029364,
+      "saved_length": 3.936124965819481,
+      "saved_fraction": 0.07718210264957226
+    },
+    {
+      "case": "random-28",
+      "seed": 28,
+      "scenario": "random",
+      "target_diameter": 0.1,
+      "initial_count": 40,
+      "a_status": "success",
+      "b_status": "success",
+      "a_length": 65.43459755416353,
+      "b_length": 65.43459755416353,
+      "a_elapsed": 0.33835837501101196,
+      "b_elapsed": 3.2966319581028074,
+      "saved_length": 0.0,
+      "saved_fraction": 0.0
+    },
+    {
+      "case": "random-38",
+      "seed": 38,
+      "scenario": "random",
+      "target_diameter": 0.1,
+      "initial_count": 40,
+      "a_status": "success",
+      "b_status": "success",
+      "a_length": 40.23230509880325,
+      "b_length": 37.91247366791911,
+      "a_elapsed": 0.2903021250385791,
+      "b_elapsed": 3.3719269579742104,
+      "saved_length": 2.3198314308841432,
+      "saved_fraction": 0.057660912671721354
+    },
+    {
+      "case": "random-49",
+      "seed": 49,
+      "scenario": "random",
+      "target_diameter": 0.1,
+      "initial_count": 40,
+      "a_status": "success",
+      "b_status": "success",
+      "a_length": 46.00228910142494,
+      "b_length": 44.532059016076445,
+      "a_elapsed": 0.32207104191184044,
+      "b_elapsed": 3.4009964999277145,
+      "saved_length": 1.470230085348497,
+      "saved_fraction": 0.03195993316999857
+    },
+    {
+      "case": "random-70",
+      "seed": 70,
+      "scenario": "random",
+      "target_diameter": 0.1,
+      "initial_count": 40,
+      "a_status": "success",
+      "b_status": "success",
+      "a_length": 48.101581786987076,
+      "b_length": 47.722248162834994,
+      "a_elapsed": 0.2980240420438349,
+      "b_elapsed": 3.3463770009111613,
+      "saved_length": 0.37933362415208194,
+      "saved_fraction": 0.007886094595223936
+    },
+    {
+      "case": "random-1",
+      "seed": 1,
+      "scenario": "random",
+      "target_diameter": 0.1,
+      "initial_count": 40,
+      "a_status": "success",
+      "b_status": "success",
+      "a_length": 48.35598273443769,
+      "b_length": 48.35598273443769,
+      "a_elapsed": 0.33464754093438387,
+      "b_elapsed": 3.2913113317918032,
+      "saved_length": 0.0,
+      "saved_fraction": 0.0
+    },
+    {
+      "case": "random-97",
+      "seed": 97,
+      "scenario": "random",
+      "target_diameter": 0.1,
+      "initial_count": 40,
+      "a_status": "success",
+      "b_status": "success",
+      "a_length": 45.34413466960847,
+      "b_length": 45.34413466960847,
+      "a_elapsed": 0.30136908404529095,
+      "b_elapsed": 3.267674209084362,
+      "saved_length": 0.0,
+      "saved_fraction": 0.0
+    },
+    {
+      "case": "random-85",
+      "seed": 85,
+      "scenario": "random",
+      "target_diameter": 0.1,
+      "initial_count": 40,
+      "a_status": "success",
+      "b_status": "success",
+      "a_length": 40.02862817535215,
+      "b_length": 40.02862817535215,
+      "a_elapsed": 0.3485184588935226,
+      "b_elapsed": 3.2852031260263175,
+      "saved_length": 0.0,
+      "saved_fraction": 0.0
+    },
+    {
+      "case": "random-54",
+      "seed": 54,
+      "scenario": "random",
+      "target_diameter": 0.1,
+      "initial_count": 40,
+      "a_status": "success",
+      "b_status": "success",
+      "a_length": 48.04030282707179,
+      "b_length": 43.299168408039804,
+      "a_elapsed": 0.34127054107375443,
+      "b_elapsed": 3.3676485819742084,
+      "saved_length": 4.741134419031987,
+      "saved_fraction": 0.09869076879257832
+    }
+  ],
+  "date": "2026-11-08",
+  "simulation_commit": "1775cb4",
+  "source_world_config": {
+    "world": {
+      "width": 12,
+      "height": 9,
+      "step_time": 0.04,
+      "sample_time": 0.04,
+      "control_mode": "auto",
+      "step_mode": "external",
+      "collision_mode": "unobstructed",
+      "plot": {
+        "figure_pixels": [
+          1320,
+          850
+        ],
+        "show_title": false
+      }
+    },
+    "gui": {
+      "keyboard": {
+        "backend": "mpl"
+      }
+    },
+    "robot": {
+      "state": [
+        3,
+        4.5,
+        0
+      ],
+      "color": "#2563eb",
+      "plot": {
+        "show_goal": false,
+        "show_text": false,
+        "show_arrow": true,
+        "show_trajectory": false
+      },
+      "kinematics": {
+        "name": "diff"
+      },
+      "shape": {
+        "name": "rectangle",
+        "length": 0.5,
+        "width": 0.6
+      }
+    },
+    "custom": {
+      "target_diameter": 0.1,
+      "seed": 42,
+      "random_count": 40,
+      "collector": {
+        "width": 0.35,
+        "depth": 0.24,
+        "gap": 0.0,
+        "lateral_offset": 0.0
+      },
+      "body_margin": 0.1,
+      "forward_speed": 0.6,
+      "angular_speed": 1.2
+    }
+  },
+  "source_vehicle_config": {
+    "version": 1,
+    "units": "m",
+    "body": {
+      "length": 0.5,
+      "width": 0.6,
+      "pose_reference": "body_center",
+      "rotation_center": "body_center"
+    },
+    "collector": {
+      "width": 0.35,
+      "depth": 0.24,
+      "gap": 0.0,
+      "lateral_offset": 0.0
+    },
+    "safety": {
+      "body_margin": 0.1
+    },
+    "motion": {
+      "forward_speed": 0.6,
+      "angular_speed": 1.2
+    }
+  },
+  "verification": [
+    {
+      "case": "random-41",
+      "a_collected": 40,
+      "b_collected": 40,
+      "remaining": 0,
+      "failure": null,
+      "additional_replay_dt": [
+        0.013,
+        0.7
+      ]
+    },
+    {
+      "case": "random-57",
+      "a_collected": 40,
+      "b_collected": 40,
+      "remaining": 0,
+      "failure": null,
+      "additional_replay_dt": [
+        0.013,
+        0.7
+      ]
+    },
+    {
+      "case": "random-28",
+      "a_collected": 40,
+      "b_collected": 40,
+      "remaining": 0,
+      "failure": null,
+      "additional_replay_dt": [
+        0.013,
+        0.7
+      ]
+    },
+    {
+      "case": "random-38",
+      "a_collected": 40,
+      "b_collected": 40,
+      "remaining": 0,
+      "failure": null,
+      "additional_replay_dt": [
+        0.013,
+        0.7
+      ]
+    },
+    {
+      "case": "random-49",
+      "a_collected": 40,
+      "b_collected": 40,
+      "remaining": 0,
+      "failure": null,
+      "additional_replay_dt": [
+        0.013,
+        0.7
+      ]
+    },
+    {
+      "case": "random-70",
+      "a_collected": 40,
+      "b_collected": 40,
+      "remaining": 0,
+      "failure": null,
+      "additional_replay_dt": [
+        0.013,
+        0.7
+      ]
+    },
+    {
+      "case": "random-1",
+      "a_collected": 40,
+      "b_collected": 40,
+      "remaining": 0,
+      "failure": null,
+      "additional_replay_dt": [
+        0.013,
+        0.7
+      ]
+    },
+    {
+      "case": "random-97",
+      "a_collected": 40,
+      "b_collected": 40,
+      "remaining": 0,
+      "failure": null,
+      "additional_replay_dt": [
+        0.013,
+        0.7
+      ]
+    },
+    {
+      "case": "random-85",
+      "a_collected": 40,
+      "b_collected": 40,
+      "remaining": 0,
+      "failure": null,
+      "additional_replay_dt": [
+        0.013,
+        0.7
+      ]
+    },
+    {
+      "case": "random-54",
+      "a_collected": 40,
+      "b_collected": 40,
+      "remaining": 0,
+      "failure": null,
+      "additional_replay_dt": [
+        0.013,
+        0.7
+      ]
+    }
+  ],
+  "tests": {
+    "sim": 66,
+    "planner": 29
+  },
+  "environment": {
+    "packages": {
+      "route-plan-sim": "0.1.0",
+      "route-plan-planner": "0.2.0",
+      "ompl": "2.0.1"
+    }
+  }
+}

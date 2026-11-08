@@ -134,8 +134,9 @@ def save_comparison(scene: Scene, a_goals, b_goals, output: Path):
         ax.add_patch(Polygon(final.vertices(final.safety_body), fill=False, edgecolor="#c08a2f", linestyle="--", zorder=4))
         ax.add_patch(Polygon(final.vertices(final.collector), color="#10b981", alpha=.35, zorder=4))
         ax.set_title(f"{label}\n总路程 {length:.2f} 米 · 剩余 0", fontsize=13, pad=12)
-    fig.suptitle(f"随机种子 {scene.seed} · 同一组 {len(scene.targets)} 个目标 · 路程缩短 {saving:.1%}", fontsize=15)
-    fig.text(.5, .025, "橙点为初始目标位置，两条路线均已全部清除；按实际仿真规则独立回放，无碰撞。",
+    model = f"直径 {scene.target_diameter * 100:g} cm 圆" if scene.target_diameter else "历史点模型"
+    fig.suptitle(f"随机种子 {scene.seed} · {len(scene.targets)} 个目标（{model}）· 路程缩短 {saving:.1%}", fontsize=15)
+    fig.text(.5, .025, "橙色为初始目标轮廓，按 map 尺寸绘制；两条路线均已全部清除，独立回放无碰撞。",
              ha="center", fontsize=10, color="#52627b")
     fig.tight_layout(rect=(0, .09, 1, .93))
     output = Path(output)
