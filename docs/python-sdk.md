@@ -19,12 +19,12 @@
 
 ## 依赖与安装
 
-Python 要求 `>=3.11`；运行依赖仅为 `PyYAML>=6.0.3`、`ompl==2.0.1`。源码构建使用 Hatchling，由 pip 的隔离构建流程自动安装；Hatchling 不是目标环境的运行依赖。
+SDK 运行要求 Python `>=3.10`；运行依赖仅为 `PyYAML>=6.0.3`、`ompl==2.0.1`。源码构建使用 Hatchling，由 pip 的隔离构建流程自动安装；Hatchling 不是目标环境的运行依赖。仓库内的打包脚本使用 Python 3.11 以上，业务工程只安装、调用 SDK 时不受此限制。
 
-SDK 不引入 IR-SIM、Matplotlib、NumPy、SciPy、Shapely、Pillow 或 ROS。OMPL 含本地二进制组件，目标平台需要能够安装对应的 OMPL 2.0.1 发行包或提供可用构建。本次独立环境验证使用 macOS arm64、Python 3.11。
+SDK 不引入 IR-SIM、Matplotlib、NumPy、SciPy、Shapely、Pillow 或 ROS。OMPL 含本地二进制组件，目标平台需要能够安装对应的 OMPL 2.0.1 发行包或提供可用构建。独立环境验证平台为 macOS arm64，已验证 Python 3.11 及 3.10.20。Python 3.10 的 wheel 和源码分发包分别在全新环境中安装，各通过 12 项公共 API 测试、环境隔离检查和实际 OMPL 绕行清除检查，两个 example 均成功。
 
 ```bash
-python3.11 -m venv .venv
+python3.10 -m venv .venv
 source .venv/bin/activate
 python -m pip install /完整路径/route_plan_sdk-0.1.0-py3-none-any.whl
 

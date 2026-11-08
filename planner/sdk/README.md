@@ -8,7 +8,7 @@
 
 | 依赖 | 版本要求 | 用途 |
 | --- | --- | --- |
-| Python | `>=3.11` | 运行环境 |
+| Python | `>=3.10` | SDK 运行环境；仓库打包工具要求 3.11 以上 |
 | PyYAML | `>=6.0.3` | 默认或自定义车辆配置读取、内部几何输入构建 |
 | OMPL | `==2.0.1` | 简单连接受阻时的 RRT 局部路径规划 |
 | Hatchling | 构建依赖，由 pip 自动隔离安装 | 从源码安装时构建 wheel；预编译 SDK wheel 安装不需要它 |
@@ -20,7 +20,7 @@ OMPL 含本地二进制组件，目标平台需要能够安装 `ompl==2.0.1` 的
 建议使用独立环境：
 
 ```bash
-python3.11 -m venv .venv
+python3.10 -m venv .venv
 # macOS / Linux
 source .venv/bin/activate
 # Windows PowerShell 使用 .venv\Scripts\Activate.ps1
