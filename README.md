@@ -7,6 +7,7 @@
 - [`sim/`](sim/README.md)：独立的 IR-SIM 场景、交互窗口和几何规则，包含自己的依赖与启动入口。
 - [`sim/config/robot.yaml`](sim/config/robot.yaml)：默认车辆配置，每次初始化自动读取。
 - [`planner/`](planner/README.md)：静态完整观测的自动清除 baseline，包含任务搜索、OMPL 绕行、自动演示与回放验证。
+- [现行技术方案](docs/technical-design.md)：v0.2.0 的系统结构、任务搜索、运动规划、长度优化与验证机制。
 - [目标消除规划与分阶段验证计划](docs/planning-roadmap.md)：从静态完整准确观测开始，逐步验证车头方向加点和随机加点。
 - [第一阶段静态规划 baseline](docs/static-baseline.md)：当前实现范围、验证结果与能力边界。
 - [路径长度优化与 A/B 验证](docs/path-length-optimization.md)：在全部清除及安全约束下优化路程，对比可行性 baseline。
