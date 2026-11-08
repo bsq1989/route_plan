@@ -26,7 +26,8 @@ class SceneRulesTest(unittest.TestCase):
         self.assertNotEqual(trial.path, scene.path)
 
     def empty(self):
-        scene = Scene(body_margin=0, robot_config=LEGACY_ROBOT)
+        # Keep the original point-geometry regression fixtures explicit.
+        scene = Scene(body_margin=0, robot_config=LEGACY_ROBOT, target_diameter=0)
         scene.targets.clear()
         return scene
 

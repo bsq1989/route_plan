@@ -8,6 +8,7 @@
 - `sim/config/robot.yaml`：默认车辆配置，每次新建 `Scene` 自动读取。
 - `sim/src/route_plan_sim/world.yaml`：地图、初始位姿和场景随机参数。
 - `sim/src/route_plan_sim/scene.py`：几何状态、目标管理、消除与碰撞判定。
+- `sim/src/route_plan_sim/drawing.py`：按 map 米制尺寸绘制目标圆，手动窗口与规划器共用。
 - `sim/src/route_plan_sim/control.py`：map 目标位姿执行器 `PoseController`。
 - `sim/src/route_plan_sim/config.py`：车辆配置加载、校验及场景配置合并。
 - `sim/src/route_plan_sim/app.py`：IR-SIM 显示适配、中文界面与手动控制。
@@ -61,11 +62,11 @@ uv run --project planner route-plan compare --seeds 0:100 --timeout 3 --output s
 | 参数 | 当前值 |
 | --- | --- |
 | 车长、车宽 | 0.50 m、0.60 m |
-| 消除区横向宽度、向前深度 | 0.24 m、0.35 m |
+| 消除区横向宽度、向前深度 | 0.35 m、0.24 m |
 | 每侧车身外扩 | 0.10 m，安全矩形为 0.70 × 0.80 m |
 | 前进、转向速度 | 0.6 m/s、1.2 rad/s，仿真动画用 |
 
-消除区的“24 × 35 cm”目前按宽 24 cm、向前深 35 cm 解释。安装位置暂按居中紧贴车头；pose 参考点和旋转中心暂按车身中心。这些安装假设在用户提供实车信息后再更新，不自行当成已确认的测量值。
+消除区尺寸已确认为横向宽 35 cm、向前深 24 cm。安装位置暂按居中紧贴车头；pose 参考点和旋转中心暂按车身中心。这些安装假设在用户提供实车信息后再更新，不自行当成已确认的测量值。
 
 - 车体 x 轴向前、y 轴向左。`collector.gap` 为消除区与车头的间距；`lateral_offset` 为左右偏移，正值向左。
 - 目前仅支持 `body_center` 参考点和旋转中心，其他值会报错。
@@ -96,9 +97,10 @@ print(state["pose"], state["remaining"], state["failure"])
 
 - `scene.pose`：当前 `(x, y, yaw)`，米、米、弧度。
 - `scene.targets` / `scene.collected`：未消除 / 已消除目标，格式为 `{id: (x, y)}`。
-- `scene.snapshot()`：返回位姿、剩余点、已消除点、失败原因、场景、种子和尺寸。
+- `(x, y)` 为圆心。`scene.target_diameter` / `scene.target_radius` 为统一物理尺寸，默认直径 0.10 m，来自场景的 `custom.target_diameter`，可通过 `Scene(target_diameter=...)` 覆盖。目标半径与车辆外扩距离独立，不可重复并入 `body_margin`。
+- `scene.snapshot()`：返回位姿、剩余目标、已消除目标、失败原因、场景、种子、车辆尺寸和 `target_diameter`。
 - `scene.clone()`：复制当前场景用于独立试算，不读取磁盘配置，不创建窗口；配置、目标、已消除点和轨迹不共享可变状态。
-- `scene.add_target(x, y)`、`scene.remove_nearest(x, y)`：增删点；安全轮廓内及边界上的点禁止添加。
+- `scene.add_target(x, y)`、`scene.remove_nearest(x, y)`：增删圆形目标；整个圆必须在地图内，与安全轮廓接触或与其他目标圆穿透重叠时禁止添加。近重合圆心沿用去重规则。
 - `scene.reset()`：恢复当前预设及同一随机种子的初始状态；不重新读取磁盘配置。重新初始化 `Scene` 才会读取文件中的新参数。
 - `scene.set_dimensions(...)`：调整 `body_length`、`body_width`、`collector_width`、`collector_depth`、可选的 `body_margin`；非法值、越界或接触剩余点时拒绝整次更新。
 - `controller.set_goal(x, y, yaw)`：下发目标；新指令替换旧指令。非法指令抛出 `ValueError`，旧指令保留。
@@ -111,10 +113,10 @@ print(state["pose"], state["remaining"], state["failure"])
 1. 小车与目标使用同一 map 坐标系；界面 yaw 使用度，Python 目标位姿 API 使用弧度。0° 向右，90° 向上，逆时针为正。
 2. 目标位置不能处于当前车头后半平面：`(goal_x-x)*cos(yaw) + (goal_y-y)*sin(yaw) >= 0`，正侧方允许。目标与当前位置相同时可以只调整朝向。
 3. 执行顺序为原地转向目标位置 → 向前直线到达 `(x, y)` → 原地调整到最终 yaw。始终禁止倒车，不采用边走边转的模型。
-4. 目标是数学点；绘制的圆点尺寸不代表实体半径。消除区在前进和旋转时都有效，可同时消除多个点。
-5. 碰撞按车身每侧外扩后的矩形判断，未消除点接触内部或边界都不允许。安全轮廓和消除区也不能接触地图边界。
-6. 检查整个运动过程，不能仅检查起点、终点或显示帧。当前使用矩形边界解析接触时刻处理前进和旋转。
-7. 先被消除的点不再触发后续碰撞；同一点同时接触安全轮廓与消除区时，碰撞优先。
+4. 默认目标为直径 10 cm 的圆形实体，按真实 map 尺寸绘制。消除区在前进和旋转时都有效，与圆接触（含相切）即消除，不要求圆心或整个圆进入，可同时消除多个目标。
+5. 碰撞按车身每侧外扩后的安全矩形与目标圆求交，圆与内部或边界接触、相切都不允许。安全轮廓和消除区也不能接触地图边界。
+6. 检查整个运动过程，不能仅检查起点、终点或显示帧。连续接触时刻用圆心轨迹与矩形的直边、圆角偏置边界解析求解；不能用再次扩大长宽的矩形替代圆角，否则角部会误报。
+7. 先被消除的目标不再触发后续碰撞；同一目标同时接触安全轮廓与消除区时，碰撞优先。
 8. 碰撞后冻结在首次接触处，取消位姿指令剩余动作，重置后才能继续。随机场景不保证可解。
 
 ## 界面与开发验证
@@ -126,3 +128,5 @@ print(state["pose"], state["remaining"], state["failure"])
 目标点由 `Scene` 管理并叠加绘制，未放进 IR-SIM 普通障碍物列表；IR-SIM 使用 external step 模式同步位姿。后续接规划器或 Nav2 时需要显式读取剩余点，不假定代价地图已经更新。
 
 保持仿真和算法目录独立，不提交 `.venv/`、缓存、截图或其他 `sim/output/` 生成物。
+
+规划导出与回放必须保留目标直径。旧归档记录若没有目标尺寸字段，按其原来的点模型（直径 0）恢复，不能把旧点模型的成功轨迹或统计直接当成 10 cm 圆模型的验证。旧点解析测试可显式设置 `target_diameter=0`，正常初始化默认使用圆形实体。

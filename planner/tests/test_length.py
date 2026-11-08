@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -31,8 +32,14 @@ class LengthPlannerTest(unittest.TestCase):
         self.assertEqual(describe_scene(scene), before)
         self.assertIsNone(a.optimization)
 
-    def test_random_route_improvement_includes_all_targets(self):
-        scene = Scene(scenario="random", seed=42)
+    def test_known_improvable_random_route_includes_all_targets(self):
+        # Pin this strict >1% improvement witness to its original vehicle.
+        # Arbitrary new geometry is only guaranteed to keep a safe incumbent.
+        vehicle = read_json(Path(__file__).parent / "fixtures" / "static_cases.json")["cases"][0]["initial"]["vehicle_config"]
+        with TemporaryDirectory() as directory:
+            profile = Path(directory) / "robot.yaml"
+            profile.write_text(json.dumps(vehicle))  # JSON is also valid YAML.
+            scene = Scene(scenario="random", seed=42, robot_config=profile)
         options = PlannerOptions(timeout=3, ompl=False)
         a = StaticPlanner(options).plan(scene)
         b = LengthPlanner(options).plan(scene, initial=a)
@@ -43,6 +50,17 @@ class LengthPlannerTest(unittest.TestCase):
             self.assertFalse(final.failure)
             self.assertFalse(final.targets)
             self.assertEqual(set(final.collected), set(scene.targets))
+
+    def test_current_circle_vehicle_optimization_keeps_safe_incumbent(self):
+        scene = Scene(scenario="random", seed=42)
+        baseline = StaticPlanner(PlannerOptions(ompl=False)).plan(scene)
+        result = LengthPlanner(PlannerOptions(timeout=1, ompl=False)).plan(scene, initial=baseline)
+        self.assertEqual(result.status, "success")
+        self.assertLessEqual(result.length, baseline.length + 1e-8)
+        final = replay(scene, result.goals, dt=.13)
+        self.assertIsNone(final.failure)
+        self.assertFalse(final.targets)
+        self.assertEqual(final.target_diameter, .1)
 
     def test_exhausted_optimization_keeps_verified_incumbent(self):
         scene = Scene()
@@ -87,7 +105,8 @@ class LengthPlannerTest(unittest.TestCase):
     def test_zero_distance_rotation_has_zero_length_cost(self):
         scene = Scene()
         scene.targets.clear()
-        scene.add_target(3.5, 4.7)
+        scene.add_target(3.45, 4.8)
+        self.assertEqual(len(scene.targets), 1)
         seed = PlanResult("success", goals=[(3, 4.5, .5)])
         b = LengthPlanner(PlannerOptions(timeout=.2, ompl=False)).plan(scene, initial=seed)
         self.assertEqual(b.status, "success")

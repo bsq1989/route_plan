@@ -22,6 +22,7 @@ import yaml
 
 from .scene import Scene, finite
 from .control import PoseController
+from .drawing import TargetCircles
 
 OUTPUT = Path(__file__).resolve().parents[2] / "output"
 INK = "#24334a"
@@ -46,8 +47,9 @@ def error_text(error: ValueError) -> str:
     return {
         "Values must be finite numbers": "请输入有效的有限数值。",
         "Reset the scene after a collision": "发生碰撞，请先重置场景。",
-        "Target must be inside the map": "目标点必须位于场地内部。",
-        "Cannot place a target inside the robot body": "目标点不能触碰车身安全轮廓。",
+        "Target must be inside the map": "整个目标圆必须位于场地内部。",
+        "Target circles must not overlap": "目标圆不能与已有目标重叠。",
+        "Cannot place a target inside the robot body": "目标圆不能触碰车身安全轮廓。",
         "Dimensions must be positive": "车身和消除区的尺寸必须大于 0。",
         "Body margin must be nonnegative": "车身外扩距离必须大于或等于 0。",
         "Resized footprint must fit inside the map": "新尺寸在当前位置或初始位置越界，请缩小尺寸。",
@@ -62,7 +64,7 @@ def failure_text(failure: str | None) -> str | None:
     if failure == "Map boundary":
         return "安全轮廓或消除器触碰场地边界，已停止"
     if failure and failure.startswith("Body hit target #"):
-        return f"安全轮廓触碰目标点 #{failure.partition('#')[2]}，已停止"
+        return f"安全轮廓触碰目标圆 #{failure.partition('#')[2]}，已停止"
     return failure
 
 
@@ -132,8 +134,8 @@ class Viewer:
         self.body_alarm = Polygon(scene.vertices(scene.body), facecolor="none",
                                   edgecolor="#ef4444", linewidth=3, zorder=6, visible=False)
         self.ax.add_patch(self.body_alarm)
-        self.targets = self.ax.scatter([], [], s=43, color="#f6b64a", edgecolor="#cf8d23",
-                                       linewidth=.75, zorder=5)
+        self.targets = TargetCircles(self.ax, facecolor="#f6b64a", edgecolor="#cf8d23",
+                                      linewidth=.75, zorder=5)
         self.hit = self.ax.scatter([], [], s=180, marker="x", color="#dc2626", linewidth=3, zorder=8)
         self.path, = self.ax.plot([], [], color="#93b4ee", linewidth=1.5, zorder=2)
         self.ax.set_xlabel("横向位置 / 米", fontsize=9, color=MUTED, labelpad=10)
@@ -141,7 +143,7 @@ class Viewer:
         self.fig.legend(handles=[Patch(color="#2563eb", label="车身"),
                                  Patch(color="#10b981", alpha=.4, label="消除区"),
                                  Patch(facecolor="none", edgecolor="#c08a2f", linestyle="--", label="安全轮廓"),
-                                 Patch(color="#f6b64a", label="目标点")],
+                                 Patch(color="#f6b64a", label=f"目标 Ø{scene.target_diameter * 100:g} cm")],
                         loc="upper left", bbox_to_anchor=(.16, .862), frameon=False,
                         fontsize=9, ncol=4, handlelength=1, handleheight=.8,
                         labelcolor=MUTED, columnspacing=1.8)
@@ -399,7 +401,7 @@ class Viewer:
             self.goal_heading.set_data([], [])
         self.body_alarm.set_xy(self.scene.vertices(self.scene.body))
         self.body_alarm.set_visible(bool(self.scene.failure))
-        self.targets.set_offsets(np.array(list(self.scene.targets.values())).reshape(-1, 2))
+        self.targets.set_targets(self.scene.targets.values(), self.scene.target_radius)
         self.hit.set_offsets(np.array([self.scene.collision_point] if self.scene.collision_point else []).reshape(-1, 2))
         path = np.array(self.scene.path)
         self.path.set_data(path[:, 0], path[:, 1])

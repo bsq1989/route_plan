@@ -26,8 +26,8 @@ class RobotConfigTest(unittest.TestCase):
 
     def test_real_robot_is_the_default_for_each_new_episode(self):
         scene = Scene()
-        for key, expected in dict(body_length=.5, body_width=.6, collector_width=.24,
-                                  collector_depth=.35, body_margin=.1).items():
+        for key, expected in dict(body_length=.5, body_width=.6, collector_width=.35,
+                                  collector_depth=.24, body_margin=.1).items():
             self.assertAlmostEqual(scene.dimensions[key], expected)
         self.assertAlmostEqual(scene.safety_body.xmax - scene.safety_body.xmin, .7)
         self.assertAlmostEqual(scene.safety_body.ymax - scene.safety_body.ymin, .8)
@@ -69,10 +69,10 @@ class RobotConfigTest(unittest.TestCase):
         scene = Scene(robot_config=self.write_profile())
         scene.targets.clear()
         self.assertAlmostEqual(scene.collector.xmin, .30)
-        self.assertAlmostEqual(scene.collector.ymin, -.09)
+        self.assertAlmostEqual(scene.collector.ymin, -.145)
         scene.set_dimensions(**(scene.dimensions | {"body_length": .8}))
         self.assertAlmostEqual(scene.collector.xmin, .45)
-        self.assertAlmostEqual(scene.collector.ymax, .15)
+        self.assertAlmostEqual(scene.collector.ymax, .205)
 
     def test_invalid_profile_never_falls_back_to_demo_sizes(self):
         profiles = []
@@ -93,9 +93,12 @@ class RobotConfigTest(unittest.TestCase):
 
     def test_real_narrow_collector_does_not_remove_shoulder_points(self):
         scene = Scene()
+        scene.targets.clear()
+        scene.add_target(4.8, 4.8)
         scene.forward(1.5)
         self.assertIsNotNone(scene.failure)
-        self.assertAlmostEqual(scene.pose[0], 4.45)
+        self.assertAlmostEqual(scene.pose[0], 4.4)  # 5 cm radius contacts sooner.
+        self.assertIn((4.8, 4.8), scene.targets.values())
         self.assertFalse(scene.collected)
 
 

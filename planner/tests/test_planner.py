@@ -94,7 +94,8 @@ class StaticBaselineTest(unittest.TestCase):
 
     def test_rotation_can_collect_without_translation(self):
         scene = self.empty()
-        scene.add_target(3.5, 4.7)
+        scene.add_target(3.45, 4.8)
+        self.assertEqual(len(scene.targets), 1)
         final = replay(scene, [(3, 4.5, .5)])
         self.assertFalse(final.failure)
         self.assertFalse(final.targets)
@@ -125,12 +126,46 @@ class StaticBaselineTest(unittest.TestCase):
         self.assertEqual(set(final.collected), expected_ids)
         self.assertEqual(restored.dimensions["collector_width"], .31)
 
+    def test_records_preserve_circle_size_and_legacy_points_explicitly(self):
+        scene = Scene(target_diameter=.16)
+        scene.targets.clear()
+        scene.add_target(5, 4.5)
+        record = json.loads(json.dumps(describe_scene(scene)))
+        restored = restore_scene(record)
+        self.assertEqual(restored.target_diameter, .16)
+        self.assertEqual(restored.snapshot(), scene.snapshot())
+        # A conflicting stored geometry must never silently replay as another size.
+        record["state"]["target_diameter"] = .1
+        with self.assertRaisesRegex(ValueError, "diameter"):
+            restore_scene(record)
+        # Historical point plans lack both fields; preserve their original model.
+        record["state"].pop("target_diameter")
+        record["world_config"]["custom"].pop("target_diameter")
+        restored = restore_scene(record)
+        self.assertEqual(restored.target_diameter, 0)
+
+    def test_circle_plan_replays_with_geometry_and_ids_preserved(self):
+        scene = self.empty()
+        for point in ((4, 4.5), (5, 5)):
+            scene.add_target(*point)
+        before = describe_scene(scene)
+        result = StaticPlanner(PlannerOptions(ompl=False)).plan(scene)
+        self.assertEqual(result.status, "success", result.reason)
+        restored = restore_scene(json.loads(json.dumps(before)))
+        for dt in (.013, .7, 10):
+            final = replay(restored, result.goals, dt=dt)
+            self.assertIsNone(final.failure)
+            self.assertFalse(final.targets)
+            self.assertEqual(set(final.collected), set(scene.targets))
+            self.assertEqual(final.target_diameter, .1)
+
     def test_ompl_bypasses_blocker_and_final_approach_collects(self):
         scene = self.empty()
         scene.add_target(4.5, 4.8)
         scene.add_target(6.5, 4.5)
         blocker_id, target_id = scene.targets
-        goal = (5.915, 4.5, 0)
+        # Derive the approach from the active collector and physical radius.
+        goal = (6.5 - scene.collector.xmax - scene.target_radius + .015, 4.5, 0)
         self.assertIsNone(steer(scene, goal))
         connected = OmplMotion(seconds=4, seed=42).connect(scene, goal, time.monotonic() + 5)
         self.assertIsNotNone(connected)

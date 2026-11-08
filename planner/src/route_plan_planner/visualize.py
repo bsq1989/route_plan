@@ -9,8 +9,9 @@ from route_plan_sim import PoseController, Scene
 
 def _canvas(scene):
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Polygon
+    from matplotlib.patches import Patch, Polygon
     from route_plan_sim.app import configure_chinese_font
+    from route_plan_sim.drawing import TargetCircles
 
     configure_chinese_font()
     fig, ax = plt.subplots(figsize=(10, 7), dpi=95)
@@ -19,7 +20,8 @@ def _canvas(scene):
     ax.set(xlim=(0, scene.width), ylim=(0, scene.height), aspect="equal",
            xlabel="横向位置 / 米", ylabel="纵向位置 / 米")
     ax.grid(alpha=.15)
-    targets = ax.scatter([], [], color="#f5a623", edgecolors="#b77915", s=42, zorder=5, label="剩余目标")
+    targets = TargetCircles(ax, facecolor="#f5a623", edgecolors="#b77915", zorder=5,
+                            label=f"剩余目标（直径 {scene.target_diameter * 100:g} cm）")
     collected = ax.scatter([], [], color="#a3d8bd", marker="x", s=24, zorder=2, label="已消除")
     body = Polygon(scene.vertices(scene.body), color="#3568e8", alpha=.85, zorder=4)
     safety = Polygon(scene.vertices(scene.safety_body), fill=False, edgecolor="#c08a2f", linestyle="--", zorder=3)
@@ -28,7 +30,9 @@ def _canvas(scene):
         ax.add_patch(patch)
     path, = ax.plot([], [], color="#6f9de5", lw=1.8, zorder=2)
     heading, = ax.plot([], [], color="white", lw=2, zorder=6)
-    ax.legend(loc="upper right", fontsize=9)
+    ax.legend(handles=[Patch(facecolor="#f5a623", edgecolor="#b77915",
+                             label=f"剩余目标（直径 {scene.target_diameter * 100:g} cm）"), collected],
+              loc="upper right", fontsize=9)
     title = ax.set_title("静态目标自动消除", pad=14, fontsize=15)
     fig.text(.5, .025, "蓝色：车身    橙色虚线：安全轮廓    绿色：前置消除区    回放采用仿真连续碰撞规则",
              ha="center", fontsize=9, color="#52627b")
@@ -36,7 +40,7 @@ def _canvas(scene):
 
     def update(current):
         import numpy as np
-        targets.set_offsets(np.array(list(current.targets.values())).reshape(-1, 2))
+        targets.set_targets(current.targets.values(), current.target_radius)
         collected.set_offsets(np.array(list(current.collected.values())).reshape(-1, 2))
         body.set_xy(current.vertices(current.body))
         safety.set_xy(current.vertices(current.safety_body))
@@ -104,6 +108,7 @@ def save_comparison(scene: Scene, a_goals, b_goals, output: Path):
     from matplotlib.patches import Polygon
     from route_plan_sim.app import configure_chinese_font
     from .motion import path_length, replay
+    from route_plan_sim.drawing import TargetCircles
 
     configure_chinese_font()
     a, b = replay(scene, a_goals), replay(scene, b_goals)
@@ -119,8 +124,8 @@ def save_comparison(scene: Scene, a_goals, b_goals, output: Path):
                xlabel="横向位置 / 米", ylabel="纵向位置 / 米")
         ax.grid(alpha=.15)
         if scene.targets:
-            tx, ty = zip(*scene.targets.values())
-            ax.scatter(tx, ty, s=28, color="#f5a623", edgecolors="#b77915", linewidths=.5, zorder=3)
+            targets = TargetCircles(ax, facecolor="#f5a623", edgecolors="#b77915", linewidths=.5, zorder=3)
+            targets.set_targets(scene.targets.values(), scene.target_radius)
         px, py = zip(*final.path)
         ax.plot(px, py, color=color, lw=1.7, zorder=2)
         ax.scatter(*scene.pose[:2], s=65, marker="o", color=color, zorder=4)

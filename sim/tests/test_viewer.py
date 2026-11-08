@@ -33,7 +33,16 @@ class ViewerTest(unittest.TestCase):
         self.finish_action()
         self.assertEqual(len(self.viewer.scene.collected), 3)
         np.testing.assert_allclose(self.viewer.env.robot.state.flatten(), self.viewer.scene.pose)
-        self.assertEqual(len(self.viewer.targets.get_offsets()), 7)
+        self.assertEqual(len(self.viewer.targets.get_paths()), 7)
+
+    def test_targets_are_rendered_in_map_units(self):
+        radius = self.viewer.scene.target_radius
+        first = self.viewer.targets.get_paths()[0].get_extents()
+        self.assertAlmostEqual(first.width, 2 * radius)
+        self.assertAlmostEqual(first.height, 2 * radius)
+        self.viewer.ax.set_xlim(0, 6)
+        self.viewer.fig.canvas.draw()
+        self.assertAlmostEqual(self.viewer.targets.get_paths()[0].get_extents().width, 2 * radius)
 
     def test_absolute_heading_and_pause(self):
         self.viewer.heading_box.set_val("450")
@@ -136,8 +145,8 @@ class ViewerTest(unittest.TestCase):
         viewer = Viewer(Scene(), display=False)
         try:
             self.assertEqual(viewer.dimension_boxes["body_length"].text, "0.5")
-            self.assertEqual(viewer.dimension_boxes["collector_width"].text, "0.24")
-            self.assertEqual(viewer.dimension_boxes["collector_depth"].text, "0.35")
+            self.assertEqual(viewer.dimension_boxes["collector_width"].text, "0.35")
+            self.assertEqual(viewer.dimension_boxes["collector_depth"].text, "0.24")
             self.assertAlmostEqual(viewer.env.robot.geometry.area, .5 * .6)
             self.assertAlmostEqual(viewer.scene.collector.xmin, .25)
             np.testing.assert_allclose(viewer.collector.get_xy()[:4],

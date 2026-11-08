@@ -72,12 +72,12 @@ class PoseControllerTest(unittest.TestCase):
         self.assertIsNone(self.controller.goal)
 
     def test_collision_aborts_remainder_of_pose_command(self):
-        self.scene.add_target(4, 4.9)
+        self.scene.add_target(4, 4.91)  # Circle clears collector, hits safety corner.
         self.controller.set_goal(5, 4.5, 1)
         self.finish()
         self.assertIsNotNone(self.scene.failure)
         self.assertIsNone(self.controller.command)
-        self.assertAlmostEqual(self.scene.pose[0], 3.5)
+        self.assertAlmostEqual(self.scene.pose[0], 3.5 - math.sqrt(.05**2 - .01**2))
         self.assertAlmostEqual(self.scene.pose[2], 0)
 
     def test_goal_replacement_starts_from_current_pose(self):

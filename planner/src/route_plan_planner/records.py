@@ -36,6 +36,12 @@ def restore_scene(record: dict) -> Scene:
         raise ValueError("Cannot replay a failed initial scene")
     config["robot"]["state"] = state["pose"]
     config["custom"]["random_count"] = 0
+    # Older records used mathematical points. Preserve that model explicitly.
+    diameter = state.get("target_diameter", config["custom"].get("target_diameter", 0.))
+    if "target_diameter" in state and "target_diameter" in config["custom"]:
+        if state["target_diameter"] != config["custom"]["target_diameter"]:
+            raise ValueError("Target diameter differs between state and configuration")
+    config["custom"]["target_diameter"] = diameter
     # Use normal constructor/config validation, including the stored geometry.
     with TemporaryDirectory(prefix="route-plan-replay-") as directory:
         world = Path(directory) / "world.yaml"
@@ -62,6 +68,7 @@ def restore_scene(record: dict) -> Scene:
     scene.scenario = state["scenario"]
     # Retain the stored source configuration for subsequent record exports.
     scene.config = deepcopy(record["world_config"])
+    scene.config["custom"]["target_diameter"] = diameter
     return scene
 
 

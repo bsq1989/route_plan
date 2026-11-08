@@ -1,8 +1,8 @@
-"""Point-target rules independent of IR-SIM and the graphical interface.
+"""Circle-target rules independent of IR-SIM and the graphical interface.
 
-Actions are straight translations or rotations in place. Rectangle boundary
-crossing times are solved analytically, including tangencies, so checking only
-the displayed animation frames cannot hide a collision or collection.
+Actions are straight translations or rotations in place. Circle/rectangle
+contact times are solved analytically, including corner tangencies, so checking
+only displayed animation frames cannot hide a collision or collection.
 """
 
 from __future__ import annotations
@@ -60,33 +60,54 @@ class Rect:
         return (self.xmin - EPS <= x <= self.xmax + EPS
                 and self.ymin - EPS <= y <= self.ymax + EPS)
 
+    def intersects_circle(self, x: float, y: float, radius: float) -> bool:
+        """Closed rectangle vs disk, including rounded corner offsets."""
+        dx = max(self.xmin - x, 0., x - self.xmax)
+        dy = max(self.ymin - y, 0., y - self.ymax)
+        return math.hypot(dx, dy) <= radius + EPS
+
     @property
     def corners(self) -> list[tuple[float, float]]:
         return [(self.xmin, self.ymin), (self.xmax, self.ymin),
                 (self.xmax, self.ymax), (self.xmin, self.ymax)]
 
     def first_contact(self, px: float, py: float, distance: float,
-                      rotation: float) -> float:
+                      rotation: float, radius: float = 0.) -> float:
+        """Solve contacts with the offset rectangle's sides and corner arcs.
+
+        Radius zero retains the historical point model for archived records.
+        """
         candidates = [0.0, 1.0]
         if distance:
-            candidates += [(px - edge) / distance for edge in (self.xmin, self.xmax)]
+            candidates += [(px - edge) / distance for edge in (self.xmin - radius, self.xmax + radius)]
+            if radius:
+                for cx, cy in self.corners:
+                    dy = py - cy
+                    if abs(dy) <= radius + EPS:
+                        root = math.sqrt(max(0., radius**2 - dy**2))
+                        candidates += [(px - cx - root) / distance, (px - cx + root) / distance]
         elif rotation:
-            for edge in (self.xmin, self.xmax):
+            for edge in (self.xmin - radius, self.xmax + radius):
                 candidates += trig_times(px, py, edge, rotation)
-            for edge in (self.ymin, self.ymax):
+            for edge in (self.ymin - radius, self.ymax + radius):
                 candidates += trig_times(py, -px, edge, rotation)
+            if radius:
+                for cx, cy in self.corners:
+                    # |R(-rotation*t)*p - corner|² = radius².
+                    value = (px**2 + py**2 + cx**2 + cy**2 - radius**2) / 2
+                    candidates += trig_times(px * cx + py * cy, py * cx - px * cy, value, rotation)
         for t in sorted(candidates):
             if not -EPS <= t <= 1 + EPS:
                 continue
             t = max(0.0, min(1.0, t))
             c, s = math.cos(rotation * t), math.sin(rotation * t)
-            if self.contains(c * px + s * py - distance * t, -s * px + c * py):
+            if self.intersects_circle(c * px + s * py - distance * t, -s * px + c * py, radius):
                 return t
         return math.inf
 
 
 class Scene:
-    """Episode API. Targets are mathematical points; rectangle edges count.
+    """Episode API. Targets are disks; touching rectangle edges counts.
 
     `turn_to(degrees)` and `forward(metres)` execute a complete action. The pose
     controller uses `advance` for animation. The expanded body, including its
@@ -95,13 +116,18 @@ class Scene:
 
     def __init__(self, config: str | Path | None = None, scenario: str = "front",
                  seed: int | None = None, body_margin: float | None = None,
-                 robot_config: str | Path | None = None):
+                 robot_config: str | Path | None = None, target_diameter: float | None = None):
         self.config_path = (Path(config) if config else Path(str(DEFAULT_CONFIG))).resolve()
         self.config, self.robot_config_path = load_config(self.config_path, robot_config)
         world, robot, custom = (self.config[k] for k in ("world", "robot", "custom"))
         self.width, self.height = finite(world["width"]), finite(world["height"])
         if finite(world["step_time"]) <= 0:
             raise ValueError("step_time must be positive")
+        self.target_diameter = finite(custom.get("target_diameter", .1)
+                                      if target_diameter is None else target_diameter)
+        if self.target_diameter < 0 or self.target_diameter >= min(self.width, self.height):
+            raise ValueError("Target diameter must be nonnegative and smaller than the map")
+        custom["target_diameter"] = self.target_diameter
         length, width = finite(robot["shape"]["length"]), finite(robot["shape"]["width"])
         depth, cw = finite(custom["collector"]["depth"]), finite(custom["collector"]["width"])
         if min(self.width, self.height, length, width, depth, cw) <= 0:
@@ -155,6 +181,10 @@ class Scene:
         return [(px + c * x - s * y, py + s * x + c * y) for x, y in rect.corners]
 
     @property
+    def target_radius(self) -> float:
+        return self.target_diameter / 2
+
+    @property
     def safety_body(self) -> Rect:
         margin = self.body_margin
         return Rect(self.body.xmin - margin, self.body.ymin - margin,
@@ -197,7 +227,8 @@ class Scene:
             candidate.pose = pose
             if candidate._wall_contact(0, 0) < math.inf:
                 raise ValueError("Resized footprint must fit inside the map")
-        if any(candidate.safety_body.contains(*self.local_point(x, y)) for x, y in self.targets.values()):
+        if any(candidate.safety_body.intersects_circle(*self.local_point(x, y), self.target_radius)
+               for x, y in self.targets.values()):
             raise ValueError("Resized body overlaps an uncollected target")
         self.body, self.collector = body, collector
         self.body_margin = margin
@@ -205,7 +236,7 @@ class Scene:
         self.config["custom"]["collector"].update(width=cw, depth=depth)
         self.config["custom"]["body_margin"] = margin
         for key, point in list(self.targets.items()):
-            if collector.contains(*self.local_point(*point)):
+            if collector.intersects_circle(*self.local_point(*point), self.target_radius):
                 self.collected[key] = self.targets.pop(key)
 
     def reset(self, scenario: str | None = None) -> None:
@@ -251,9 +282,12 @@ class Scene:
             attempts = 0
             while len(self.targets) < count and attempts < max(1000, count * 100):
                 attempts += 1
-                tx, ty = rng.uniform(.1, self.width - .1), rng.uniform(.1, self.height - .1)
+                inset = max(.1, self.target_radius + 2 * EPS)
+                tx, ty = rng.uniform(inset, self.width - inset), rng.uniform(inset, self.height - inset)
                 lx, ly = self.local_point(tx, ty)
-                if not self.safety_body.contains(lx, ly) and not self.collector.contains(lx, ly):
+                if (not self.safety_body.intersects_circle(lx, ly, self.target_radius)
+                        and not self.collector.intersects_circle(lx, ly, self.target_radius)
+                        and not self._overlaps_target(tx, ty)):
                     self.add_target(tx, ty)
             if len(self.targets) != count:
                 raise ValueError("Not enough space to place random targets")
@@ -262,16 +296,23 @@ class Scene:
         if self.failure:
             raise ValueError("Reset the scene after a collision")
         x, y = finite(x), finite(y)
-        if not (0 < x < self.width and 0 < y < self.height):
+        radius = self.target_radius
+        if not (radius + EPS < x < self.width - radius - EPS
+                and radius + EPS < y < self.height - radius - EPS):
             raise ValueError("Target must be inside the map")
         local = self.local_point(x, y)
-        if self.safety_body.contains(*local):
+        if self.safety_body.intersects_circle(*local, radius):
             raise ValueError("Cannot place a target inside the robot body")
         if any(math.dist((x, y), p) < .025 for p in self.targets.values()):
             return
-        collection = self.collected if self.collector.contains(*local) else self.targets
+        if self._overlaps_target(x, y):
+            raise ValueError("Target circles must not overlap")
+        collection = self.collected if self.collector.intersects_circle(*local, radius) else self.targets
         collection[self._next_id] = (x, y)
         self._next_id += 1
+
+    def _overlaps_target(self, x: float, y: float) -> bool:
+        return any(math.dist((x, y), p) < self.target_diameter - EPS for p in self.targets.values())
 
     def remove_nearest(self, x: float, y: float, radius: float = .25) -> None:
         if self.targets:
@@ -314,8 +355,8 @@ class Scene:
         collections = []
         for key, (x, y) in self.targets.items():
             local = self.local_point(x, y)
-            body_time = self.safety_body.first_contact(*local, distance, rotation)
-            collect_time = self.collector.first_contact(*local, distance, rotation)
+            body_time = self.safety_body.first_contact(*local, distance, rotation, self.target_radius)
+            collect_time = self.collector.first_contact(*local, distance, rotation, self.target_radius)
             if collect_time + EPS < body_time:
                 collections.append((collect_time, key))
             elif body_time < stop:
@@ -341,4 +382,4 @@ class Scene:
         return {"pose": list(self.pose), "remaining": dict(self.targets),
                 "collected": dict(self.collected), "failure": self.failure,
                 "scenario": self.scenario, "seed": self.seed,
-                "dimensions": self.dimensions}
+                "dimensions": self.dimensions, "target_diameter": self.target_diameter}

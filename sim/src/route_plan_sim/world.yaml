@@ -21,5 +21,6 @@ robot:
     show_arrow: true
     show_trajectory: false
 custom:
+  target_diameter: 0.10  # 圆形目标直径，单位米
   seed: 42
   random_count: 40

@@ -123,7 +123,7 @@ class LengthPlanner:
             prefix_goals.append(baseline_goals[i])
 
         search = _LengthSearch(self.options, self.motion, self.fallback)
-        radius = max(math.hypot(x, y) for x, y in scene.collector.corners)
+        radius = max(math.hypot(x, y) for x, y in scene.collector.corners) + scene.target_radius
         # Reorder actual collection events, then regenerate approach poses.
         # Existing pose/yaw choices need not remain useful after a reversal.
         route_deadline = min(deadline, time.monotonic() + .7 * max(0., deadline - time.monotonic()))

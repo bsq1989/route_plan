@@ -93,9 +93,10 @@ class StaticPlanner:
 
     def _candidates(self, scene: Scene) -> list[Pose]:
         candidates = []
-        # Points must be safely ahead of the safety rectangle where possible.
-        near = max(scene.collector.xmin, scene.safety_body.xmax) + .015
-        far = scene.collector.xmax - min(.015, (scene.collector.xmax - scene.collector.xmin) / 10)
+        # Disk centres may be outside the tool but must clear the safety body.
+        near = max(scene.collector.xmin - scene.target_radius,
+                   scene.safety_body.xmax + scene.target_radius) + .015
+        far = scene.collector.xmax + scene.target_radius - min(.015, (scene.collector.xmax - scene.collector.xmin) / 10)
         depths = (far, (near + far) / 2) if near < far else ((scene.collector.xmin + scene.collector.xmax) / 2,)
         offset = (scene.collector.ymin + scene.collector.ymax) / 2
         for tx, ty in scene.targets.values():

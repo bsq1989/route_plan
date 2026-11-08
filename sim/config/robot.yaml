@@ -11,8 +11,8 @@ body:
   rotation_center: body_center
 
 collector:
-  width: 0.24           # 横向宽度：24 cm
-  depth: 0.35           # 向前深度：35 cm
+  width: 0.35           # 横向宽度：35 cm
+  depth: 0.24           # 向前深度：24 cm
   gap: 0.0              # 暂按紧贴车头
   lateral_offset: 0.0   # 暂按左右居中，正值向车体左侧偏移
 
