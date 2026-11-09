@@ -16,7 +16,7 @@
 - `sim/output/`：导出的 PNG、JSON 和临时构建产物，已被 Git 忽略。
 - `planner/`：独立的任务搜索、运动连接器、OMPL 绕行、自动演示及回归测试，包含自己的 `pyproject.toml` 和 `uv.lock`。
 - `planner/src/route_plan_planner/api.py`：业务请求与响应封装；`planner/sdk/`：纯算法 SDK 构建配置、依赖说明与 examples；`planner/tools/package_sdk.py`：固定打包入口。
-- `planner/src/route_plan_planner/stops.py`：`method="stops"` 停靠优化；`pickup_stops` 给出从 0 开始的目标位姿索引和批次 ID。此模式使用 `collection_mode="at_stop"`，到位后显式 `collect_at_stop()`，途中不删除目标；先优化拾取服务位姿数量，再优化路程。旧模式继续按运动接触消除。回放时必须传入 `pickup_stops`，不能用路径经过的多个点冒充一次停靠。
+- `planner/src/route_plan_planner/stops.py`：`method="stops"` 停靠优化；`pickup_stops` 给出从 0 开始的目标位姿索引和批次 ID。此模式使用 `collection_mode="at_stop"`，到位后显式 `collect_at_stop()`，途中不删除目标。每段实际平移必须大于 5 cm，每次实际转向必须大于 1°。在运动、碰撞与全部清除约束下仅优化拾取服务位姿数量。旧模式继续按运动接触消除。回放时必须传入 `pickup_stops`，不能用路径经过的多个点冒充一次停靠。
 - `docs/static-baseline.md`：静态 baseline 的验证记录与能力边界；`docs/planning-roadmap.md`：分阶段开发计划。
 - 任务规划算法通过仿真公开接口调用，不将策略代码混入显示层。根本目标是全部清除且遵守规则；`--method length` 在可行性初解基础上优化总平移路程，不要求全局最优，默认 `--method feasibility` 保留原 baseline。
 
@@ -63,14 +63,14 @@ uv run --project planner route-plan compare --seeds 0:100 --timeout 3 --output s
 
 | 参数 | 当前值 |
 | --- | --- |
-| 车长、车宽 | 0.50 m、0.60 m |
-| 消除区横向宽度、向前深度 | 0.35 m、0.24 m |
-| 每侧车身外扩 | 0.10 m，安全矩形为 0.70 × 0.80 m |
+| 车长、车宽、车高 | 0.702 m、0.610 m、0.169 m |
+| 消除区横向宽度、向前深度 | 0.180 m、0.090 m |
+| 每侧车身外扩 | 0.050 m，安全矩形为 0.802 × 0.710 m |
 | 前进、转向速度 | 0.6 m/s、1.2 rad/s，仿真动画用 |
 
-消除区尺寸已确认为横向宽 35 cm、向前深 24 cm。消除区居中，车头到消除区的间距统一使用 `body_margin`，不另加间距参数；默认间隔 10 cm。pose 参考点和旋转中心暂按车身中心。
+消除区居中，车头到消除区近边的默认间距为 18.3 cm。pose 参考点和旋转中心暂按车身中心。车高仅用于记录车型，二维碰撞使用平面轮廓。
 
-- 车体 x 轴向前、y 轴向左。`collector.gap` 是由 `body_margin` 推导的输出，旧输入值不用于新规则；`lateral_offset` 为左右偏移，正值向左。调整 `body_margin` 时消除区同步前移或后移，宽深不变。
+- 车体 x 轴向前、y 轴向左。`collector.gap` 独立于 `safety.body_margin`，省略时沿用外扩值。`lateral_offset` 为左右偏移，正值向左。
 - 目前仅支持 `body_center` 参考点和旋转中心，其他值会报错。
 - 车型选择优先级：显式 `robot_config` / `--robot-config` → 场景的 `custom.robot_config` → 默认车辆文件。场景引用的相对路径以场景文件所在目录为基准。
 - 配置缺失或非法时明确报错，不回退为旧演示尺寸。
@@ -117,7 +117,7 @@ print(state["pose"], state["remaining"], state["failure"])
 3. 执行顺序为原地转向目标位置 → 向前直线到达 `(x, y)` → 原地调整到最终 yaw。始终禁止倒车，不采用边走边转的模型。
 4. 默认目标为直径 10 cm 的圆形实体，按真实 map 尺寸绘制。旧接触模式在前进、旋转时与圆接触（含相切）即消除。`stops` 模式途中不消除，到服务位姿后逐 ID 检查圆心必须在消除矩形内；仅圆边缘相切不算，不要求整个圆进入。重叠目标也不能顺带清除区域外圆心。碰撞始终使用完整半径。新停靠记录为 `pickup_rule="center"`，旧归档缺失字段按旧 `contact` 规则回放。
 5. 碰撞按车身每侧外扩后的安全矩形与目标圆求交，圆与内部或边界接触、相切都不允许。安全轮廓和消除区也不能接触地图边界。
-   正前方的外扩区同样属于碰撞区，不能作为消除区豁免。新场景 `custom.rule_version=2`；旧归档缺少该字段时按版本 1 的原安装几何回放，不能将其成绩当成新规则验证。
+   正前方的外扩区同样属于碰撞区，不能作为消除区豁免。新场景使用 `custom.rule_version=3`，版本 2 归档的间距跟随外扩。旧归档缺少该字段时按版本 1 的原安装几何回放。
 6. 检查整个运动过程，不能仅检查起点、终点或显示帧。连续接触时刻用圆心轨迹与矩形的直边、圆角偏置边界解析求解；不能用再次扩大长宽的矩形替代圆角，否则角部会误报。
 7. 先被消除的目标不再触发后续碰撞；同一目标同时接触安全轮廓与消除区时，碰撞优先。
 8. 碰撞后冻结在首次接触处，取消位姿指令剩余动作，重置后才能继续。随机场景不保证可解。

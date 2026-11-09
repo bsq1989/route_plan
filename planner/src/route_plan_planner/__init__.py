@@ -6,7 +6,9 @@ from .length import LengthOptions, LengthPlanner
 from .stops import StopsPlanner
 from .motion import replay
 from .api import Target, PlanningRequest, PlanningResponse, PlanStep, PickupStop, plan
+from .escape import EscapeResponse, plan_escape
 
 __all__ = ["PlannerOptions", "PlanResult", "StaticPlanner", "TaskPlanner", "MotionBackend",
            "LengthOptions", "LengthPlanner", "replay", "Target", "PlanningRequest",
-           "PlanningResponse", "PlanStep", "PickupStop", "StopsPlanner", "plan"]
+           "PlanningResponse", "PlanStep", "PickupStop", "StopsPlanner", "plan", "EscapeResponse",
+           "plan_escape"]

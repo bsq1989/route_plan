@@ -120,9 +120,9 @@ class Scene:
         self.config_path = (Path(config) if config else Path(str(DEFAULT_CONFIG))).resolve()
         self.config, self.robot_config_path = load_config(self.config_path, robot_config)
         world, robot, custom = (self.config[k] for k in ("world", "robot", "custom"))
-        # Version 1 preserves the mounting geometry of archived plans.
-        self.rule_version = custom.get("rule_version", 2)
-        if type(self.rule_version) is not int or self.rule_version not in (1, 2):
+        # Keep the mounting rules of archived plans.
+        self.rule_version = custom.get("rule_version", 3)
+        if type(self.rule_version) is not int or self.rule_version not in (1, 2, 3):
             raise ValueError("Unsupported rule_version")
         custom["rule_version"] = self.rule_version
         self.collection_mode = custom.get("collection_mode", "contact")
@@ -154,7 +154,11 @@ class Scene:
         if self.body_margin < 0:
             raise ValueError("Body margin must be nonnegative")
         custom["body_margin"] = self.body_margin
-        self.collector_gap = self.body_margin if self.rule_version >= 2 else finite(custom["collector"]["gap"])
+        self._gap_follows_margin = self.rule_version == 2 or (
+            self.rule_version == 3 and "gap" not in custom["collector"]
+        )
+        self.collector_gap = (self.body_margin if self._gap_follows_margin
+                              else finite(custom["collector"].get("gap", 0)))
         custom["collector"]["gap"] = self.collector_gap
         self.collector_offset = finite(custom["collector"]["lateral_offset"])
         front = length / 2 + self.collector_gap
@@ -293,7 +297,7 @@ class Scene:
         if margin < 0:
             raise ValueError("Body margin must be nonnegative")
         body = Rect(-length / 2, -width / 2, length / 2, width / 2)
-        gap = margin if self.rule_version >= 2 else self.collector_gap
+        gap = margin if self._gap_follows_margin else self.collector_gap
         front = length / 2 + gap
         collector = Rect(front, self.collector_offset - cw / 2,
                           front + depth, self.collector_offset + cw / 2)

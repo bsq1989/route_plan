@@ -1,0 +1,18 @@
+# Previous default geometry for regression cases with fixed target positions.
+version: 1
+units: m
+body:
+  length: 0.50
+  width: 0.60
+  pose_reference: body_center
+  rotation_center: body_center
+collector:
+  width: 0.35
+  depth: 0.24
+  gap: 0.10
+  lateral_offset: 0.0
+safety:
+  body_margin: 0.10
+motion:
+  forward_speed: 0.6
+  angular_speed: 1.2

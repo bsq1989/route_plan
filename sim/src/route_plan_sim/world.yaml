@@ -21,7 +21,7 @@ robot:
     show_arrow: true
     show_trajectory: false
 custom:
-  rule_version: 2      # 消除区间距由 body_margin 推导，正面同样检查碰撞
+  rule_version: 3      # 消除区间距可独立配置，正面同样检查碰撞
   target_diameter: 0.10  # 圆形目标直径，单位米
   seed: 42
   random_count: 40

@@ -35,16 +35,20 @@ def load_config(world_path: Path, robot_path: str | Path | None = None) -> tuple
         raise ValueError("车辆配置 units 必须为 m，尺寸请先换算成米")
     try:
         body = profile["body"]
+        collector = profile["collector"]
         if body["pose_reference"] != "body_center" or body["rotation_center"] != "body_center":
             raise ValueError("当前模型仅支持车身中心作为 pose 参考点和旋转中心")
         raw = {"body_length": body["length"], "body_width": body["width"],
-               "collector_width": profile["collector"]["width"],
-               "collector_depth": profile["collector"]["depth"],
-               "collector_gap": profile["collector"].get("gap", 0),
-               "collector_offset": profile["collector"].get("lateral_offset", 0),
+               "collector_width": collector["width"],
+               "collector_depth": collector["depth"],
+               "collector_offset": collector.get("lateral_offset", 0),
                "body_margin": profile["safety"]["body_margin"],
                "forward_speed": profile["motion"]["forward_speed"],
                "angular_speed": profile["motion"]["angular_speed"]}
+        if "gap" in collector:
+            raw["collector_gap"] = collector["gap"]
+        if "height" in body:
+            raw["body_height"] = body["height"]
         values = {key: float(value) for key, value in raw.items()}
     except (KeyError, TypeError) as error:
         raise ValueError(f"车辆配置缺少字段或结构错误：{error}") from error
@@ -61,8 +65,14 @@ def load_config(world_path: Path, robot_path: str | Path | None = None) -> tuple
     robot["kinematics"] = {"name": "diff"}
     robot["shape"] = {"name": "rectangle", "length": values["body_length"], "width": values["body_width"]}
     custom = merged.setdefault("custom", {})
+    if "body_height" in values:
+        custom["body_height"] = values["body_height"]
+    else:
+        custom.pop("body_height", None)
     custom["collector"] = {"width": values["collector_width"], "depth": values["collector_depth"],
-                           "gap": values["collector_gap"], "lateral_offset": values["collector_offset"]}
+                           "lateral_offset": values["collector_offset"]}
+    if "collector_gap" in values:
+        custom["collector"]["gap"] = values["collector_gap"]
     for key in ("body_margin", "forward_speed", "angular_speed"):
         custom[key] = values[key]
     return merged, path

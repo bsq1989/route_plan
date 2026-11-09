@@ -42,7 +42,9 @@ class PublicApiTest(unittest.TestCase):
         result = plan(payload)
         decoded = json.loads(json.dumps(result.to_dict(), allow_nan=False))
         self.assertTrue(decoded["success"])
-        self.assertEqual(decoded["resolved_request"]["robot_config"]["collector"]["width"], .35)
+        profile = decoded["resolved_request"]["robot_config"]
+        self.assertEqual(profile["collector"]["width"], .180)
+        self.assertEqual(profile["body"]["height"], .169)
         repeated = plan(decoded["resolved_request"])
         self.assertTrue(repeated.success)
         self.assertEqual(set(repeated.expected_collected_ids), {"item-a", 205})
@@ -56,6 +58,23 @@ class PublicApiTest(unittest.TestCase):
             result = plan(self.request(robot_config=path))
         self.assertIsInstance(result.resolved_request["robot_config"], dict)
         self.assertTrue(plan(result.resolved_request).success)
+
+    def test_independent_gap_changes_pickup_geometry_and_roundtrips(self):
+        profile = plan(self.request(targets=[])).resolved_request["robot_config"]
+        profile["collector"]["gap"] = .25
+        request = self.request(method="stops", robot_config=profile, targets=[Target("item", 3.67, 4.5)])
+        result = plan(request)
+        self.assertTrue(result.success, result.reason)
+        self.assertEqual(result.goals, [request.pose])
+        self.assertEqual(result.pickup_stops[0].target_ids, ("item",))
+        self.assertEqual(result.resolved_request["robot_config"]["collector"]["gap"], .25)
+        self.assertEqual(plan(result.resolved_request).goals, result.goals)
+
+        del profile["collector"]["gap"]
+        fallback = plan(self.request(method="stops", robot_config=profile, targets=request.targets))
+        self.assertTrue(fallback.success, fallback.reason)
+        self.assertEqual(fallback.resolved_request["robot_config"]["collector"]["gap"], .05)
+        self.assertGreater(fallback.length, 0.)
 
     def test_initial_contact_is_explicit_and_includes_all_input_ids(self):
         request = self.request(targets=[Target("already-touching", 3.5, 4.5)])

@@ -11,7 +11,7 @@ from route_plan_sim import Scene
 
 from .core import PlannerOptions, StaticPlanner
 from .length import LengthOptions, LengthPlanner
-from .stops import StopsPlanner
+from .stops import STOPS_METHOD, StopsPlanner
 from .motion import replay
 from .records import describe_scene, read_json, restore_scene, write_json
 
@@ -53,7 +53,7 @@ def _plan_record(scene, options, method="feasibility"):
     initial = describe_scene(scene)
     planner = {"length": LengthPlanner, "feasibility": StaticPlanner, "stops": StopsPlanner}[method]
     result = planner(options).plan(scene)
-    name = {"length": "length-beam-v1", "feasibility": "static-dfs-v1", "stops": "stop-cover-beam-v1"}[method]
+    name = {"length": "length-beam-v1", "feasibility": "static-dfs-v1", "stops": STOPS_METHOD}[method]
     payload = {"schema_version": 1, "planner": name, "python": platform.python_version(),
                "options": asdict(options), "geometry": _geometry(scene),
                "initial": initial, "result": result.to_dict()}
@@ -103,7 +103,7 @@ def _replay(args):
     scene = restore_scene(record["initial"])
     goals = [tuple(goal) for goal in record["result"]["goals"]]
     pickup_stops = record["result"].get("pickup_stops", [])
-    final = replay(scene, goals, pickup_stops=pickup_stops)
+    final = replay(scene, goals, pickup_stops=pickup_stops, minimum_motion=record.get("planner") == STOPS_METHOD)
     if final.failure or final.targets:
         raise ValueError(f"Replay failed: {final.failure}; remaining={len(final.targets)}")
     print(f"replay success: {len(scene.targets)} -> 0")
@@ -127,7 +127,7 @@ def _benchmark(args):
         rows.append(row)
         print(f"{name}: {result.status}, {result.elapsed:.3f}s, best_remaining={result.best_remaining}", flush=True)
     summary = {"planner": {"length": "length-beam-v1", "feasibility": "static-dfs-v1",
-                            "stops": "stop-cover-beam-v1"}[args.method], "options": asdict(options),
+                            "stops": STOPS_METHOD}[args.method], "options": asdict(options),
                "geometry": _geometry(scene), "selected_cases": cases, "cases": rows,
                "total": len(rows), "success": sum(row["status"] == "success" for row in rows)}
     write_json(args.output / "summary.json", summary)

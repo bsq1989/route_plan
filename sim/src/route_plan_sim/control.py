@@ -15,8 +15,10 @@ class PoseController:
     This controller does not plan detours around targets.
     """
 
-    def __init__(self, scene: Scene):
+    def __init__(self, scene: Scene, *, minimum_translation: float = 0., minimum_rotation: float = 0.):
         self.scene = scene
+        self.minimum_translation = minimum_translation
+        self.minimum_rotation = minimum_rotation
         self.goal: tuple[float, float, float] | None = None
         self.paused = False
         self._commands: deque[tuple[str, float]] = deque()
@@ -43,8 +45,13 @@ class PoseController:
             commands.append(("turn", normalize(yaw - bearing)))
         else:
             commands.append(("turn", normalize(yaw - theta)))
+        commands = [(kind, amount) for kind, amount in commands if abs(amount) > EPS]
+        for kind, amount in commands:
+            minimum = self.minimum_translation if kind == "move" else self.minimum_rotation
+            if minimum and abs(amount) <= minimum + EPS:
+                raise ValueError(f"Goal requires a {kind} inside the motion deadband")
         self.goal = x, y, yaw
-        self._commands = deque((kind, amount) for kind, amount in commands if abs(amount) > EPS)
+        self._commands = deque(commands)
         self.paused = False
 
     def stop(self) -> None:

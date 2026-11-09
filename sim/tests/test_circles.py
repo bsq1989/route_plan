@@ -9,6 +9,7 @@ from route_plan_sim import Scene
 from route_plan_sim.scene import Rect, normalize
 
 LEGACY_ROBOT = Path(__file__).parent / "fixtures" / "robot.yaml"
+PREVIOUS_ROBOT = Path(__file__).parent / "fixtures" / "robot-v0.2.4.yaml"
 
 
 class CircleContactTest(unittest.TestCase):
@@ -127,7 +128,7 @@ class CircleSceneTest(unittest.TestCase):
         self.assertIn(ids[4], whole.targets)
 
     def test_batch_validation_precedes_any_collection(self):
-        scene = Scene()
+        scene = Scene(robot_config=PREVIOUS_ROBOT)
         scene.targets.clear()
         before = scene.snapshot()
         with self.assertRaises(ValueError):
@@ -137,7 +138,7 @@ class CircleSceneTest(unittest.TestCase):
     def test_group_outer_member_can_collide_before_tool_contact(self):
         for earlier in (.002, 0.):
             with self.subTest(earlier=earlier):
-                scene = Scene()
+                scene = Scene(robot_config=PREVIOUS_ROBOT)
                 scene.targets.clear()
                 first = (5, 4.7249)
                 contact = scene.collector.first_contact(*scene.local_point(*first), 3, 0, scene.target_radius)
@@ -161,7 +162,7 @@ class CircleSceneTest(unittest.TestCase):
         self.assertEqual(scene.target_groups, (ids,))
 
     def test_front_margin_is_collision_even_at_collector_rear_edge(self):
-        scene = Scene()
+        scene = Scene(robot_config=PREVIOUS_ROBOT)
         scene.targets.clear()
         self.assertAlmostEqual(scene.collector_gap, scene.body_margin)
         self.assertAlmostEqual(scene.collector.xmin, scene.safety_body.xmax)

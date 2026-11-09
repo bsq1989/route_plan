@@ -144,11 +144,11 @@ class ViewerTest(unittest.TestCase):
     def test_default_profile_matches_real_robot_and_display(self):
         viewer = Viewer(Scene(), display=False)
         try:
-            self.assertEqual(viewer.dimension_boxes["body_length"].text, "0.5")
-            self.assertEqual(viewer.dimension_boxes["collector_width"].text, "0.35")
-            self.assertEqual(viewer.dimension_boxes["collector_depth"].text, "0.24")
-            self.assertAlmostEqual(viewer.env.robot.geometry.area, .5 * .6)
-            self.assertAlmostEqual(viewer.scene.collector.xmin, .35)
+            self.assertEqual(viewer.dimension_boxes["body_length"].text, "0.702")
+            self.assertEqual(viewer.dimension_boxes["collector_width"].text, "0.18")
+            self.assertEqual(viewer.dimension_boxes["collector_depth"].text, "0.09")
+            self.assertAlmostEqual(viewer.env.robot.geometry.area, .702 * .610)
+            self.assertAlmostEqual(viewer.scene.collector.xmin, .534)
             np.testing.assert_allclose(viewer.collector.get_xy()[:4],
                                        viewer.scene.vertices(viewer.scene.collector))
         finally:

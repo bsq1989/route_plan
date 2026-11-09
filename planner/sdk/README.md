@@ -1,6 +1,6 @@
 # Route Plan 纯算法 SDK
 
-`route-plan-sdk 0.2.1`，Python 导入名为 `route_plan_sdk`。输入静态场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。
+`route-plan-sdk 0.2.5`，Python 导入名为 `route_plan_sdk`。输入静态场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。
 
 包内包含任务规划、路径长度优化与必要的私有几何校验内核。没有 IR-SIM、窗口、绘图、动画、场景演示、ROS 或实车控制功能。无需原仓库目录或 `PYTHONPATH`，默认车型文件已随包携带。
 
@@ -29,10 +29,10 @@ source .venv/bin/activate
 python -m pip install .
 
 # 或安装提供的 SDK wheel，二者任选一个
-python -m pip install /完整路径/route_plan_sdk-0.2.1-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.5-py3-none-any.whl
 ```
 
-源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.1`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
+源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.5`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
 
 ## 最小 Python 调用
 
@@ -70,15 +70,21 @@ python examples/multi_pickup.py
 
 `quick_start.py` 可以复制到其他工程中运行，只有 SDK 导入，没有修改 `sys.path` 或引用原仓库。JSON 调用直接 `plan(request_dict)` 即可；输入示例见 `examples/request.json`。
 
+## 独立脱困
+
+`plan_escape(request)` 接收同一份地图、当前车位、车辆配置和全部观测目标。它搜索直行、原地转向或一次转向后直行，直到所有目标都离开车身外扩区。对起始就进入外扩区的物体，实体车身必须始终有净空，且距离全程不能减小。其他物体与地图边界按常规规则检查。
+
+`EscapeResponse.goals` 是按顺序执行的位姿，`initial_intrusion_ids` 标识起始侵入物，`final_pose` 是预计脱离后的位姿。脱困期间保留全部目标。状态为 `already_clear` 时可以进入常规规划。状态为 `body_contact` 或 `blocked` 时返回空动作。执行成功后，用实测位姿和最新目标重新调用 `plan()`。
+
 ## 输入约定
 
 - `width / height`：矩形场地宽高，单位米，内部原点 `(0,0)`。独立固定障碍物、栅格地图和多边形边界尚未支持。
 - `pose`：当前车辆中心 `(x,y,yaw)`。所有目标与位姿使用同一坐标系；yaw 为弧度，逆时针为正，0 朝右。
 - `targets`：`Target(id,x,y)` 列表，坐标为圆心。ID 可为非空字符串或整数，输出保留原 ID 类型；重复 ID 会报错。允许圆心重合及圆形目标重叠，所有原始 ID 都保留。
 - `target_diameter`：全部物体统一直径，默认 0.10 米；显式传 0 可表示历史点模型。
-- `method`：`feasibility`、`length` 或 `stops`，默认仍为 `length`。`stops` 按“拾取停靠次数优先、总平移路程其次”优化；先保证全部清除且无碰撞，预算耗尽时保留已验证的可行路线，不承诺全局最优。启用停车优化需要显式传 `method="stops"`，无需新增权重或 cluster 参数。
+- `method`：`feasibility`、`length` 或 `stops`，默认 `length`。实车停靠模式显式传 `method="stops"`。在全部清除且无碰撞的前提下，此模式优化拾取停靠次数，路程作为结果统计。每段实际平移大于 5 cm，每次实际转向大于 1°，包含平移前对准和到位后的末端转向。预算耗尽时返回已验证的可行路线（如果已找到）。运动死区是内置规则，无需增加输入字段。
 - `timeout`：搜索预算，默认 3 秒；包括取得可行初解的耗时，最终回放和响应整理可能增加调用总耗时。
-- `robot_config`：可选车辆 YAML 路径或完整配置字典，省略时使用随包默认车型。默认车身长宽 0.50/0.60 米，消除区宽深 0.35/0.24 米，每侧安全外扩 0.10 米。车头到消除区的间距自动等于 `body_margin`，宽深保持不变；旧 `collector.gap` 输入兼容读取，但新规则统一使用 `body_margin`。参考点及旋转中心暂按车身中心，消除区左右居中。
+- `robot_config`：可选车辆 YAML 路径或完整配置字典，省略时使用随包默认车型。默认车身长宽高为 0.702/0.610/0.169 米，高度仅作记录。消除区左右宽 0.180 米、前后长 0.090 米，每侧安全外扩 0.050 米。`collector.gap` 设置车头到消除区近边的距离，默认 0.183 米。自定义车型省略 `gap` 时使用 `body_margin`。响应的 `resolved_request.robot_config` 返回实际车型。
 - `request_id / frame_id`：可选关联标识，随响应返回；`frame_id` 默认 `map`，仅作标识，不执行坐标变换。
 - `use_ompl / seed`：是否使用 RRT 回退及随机种子。OMPL 在每个进程第一次使用时初始化随机流，同进程后续调用沿用该流，不承诺重新搜索逐位复现。
 
@@ -117,6 +123,8 @@ python examples/multi_pickup.py
 计划只能按顺序执行：每一位姿按“原地转向目标位置 → 直线前进 → 原地调整最终朝向”完成，上一条完成后再发下一条。同位置的连续 yaw 目标可能编码特定转向方向，不要自行合并。
 
 在 `stops` 模式中，到达 `pickup_stops[].goal_index` 指定的完整位姿后，一次处理其 `target_ids`。实际拾取确认完成后再继续后面的位姿，不能只取目标顺序再重算接近路径。失败时调用工程应使用实际位姿和剩余目标重新规划。`stop_count` 统计拾取服务位姿，不统计中间转向和避让带来的控制停车；同位置不同朝向的两次拾取也属于两个服务位姿。
+
+起始位姿已经覆盖目标时，首条 `goal` 可以与起始位姿相同，并在 `pickup_stops` 中标记。执行端可在原地直接触发这次拾取。
 
 `python examples/multi_pickup.py` 演示三个非重叠目标在一个服务位姿中一次清除。停车优先可能增加行驶距离；如果主要关心路程，继续使用 `method="length"`。
 

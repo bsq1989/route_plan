@@ -103,7 +103,7 @@ class LengthPlannerTest(unittest.TestCase):
         self.assertEqual(b.optimization["termination"], "improvement_replay_failed_kept_baseline")
 
     def test_zero_distance_rotation_has_zero_length_cost(self):
-        scene = Scene()
+        scene = Scene(robot_config=Path(__file__).resolve().parents[2] / "sim/tests/fixtures/robot-v0.2.4.yaml")
         scene.targets.clear()
         scene.add_target(3.45, 4.8)
         self.assertEqual(len(scene.targets), 1)

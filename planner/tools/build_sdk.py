@@ -22,7 +22,8 @@ def build(output: Path):
         raise FileExistsError(f"SDK output already exists: {destination}; choose a new output directory")
     package = destination / "src" / "route_plan_sdk"
     package.mkdir(parents=True)
-    for name in ("api.py", "core.py", "length.py", "stops.py", "motion.py", "ompl_motion.py", "records.py"):
+    for name in ("api.py", "core.py", "length.py", "stops.py", "motion.py", "ompl_motion.py", "records.py",
+                 "escape.py"):
         source = (root / "planner" / "src" / "route_plan_planner" / name).read_text()
         # Move only imports of the maintained geometry kernel into a private
         # namespace. All algorithm imports remain relative and unchanged.
@@ -31,8 +32,10 @@ def build(output: Path):
     (package / "__init__.py").write_text(
         '"""Pure algorithm SDK: static scene request -> verified map pose plan."""\n'
         'from .api import Target, PlanningRequest, PlanningResponse, PlanStep, PickupStop, plan\n'
+        'from .escape import EscapeResponse, plan_escape\n'
         f'__version__ = "{version}"\n'
-        '__all__ = ["Target", "PlanningRequest", "PlanningResponse", "PlanStep", "PickupStop", "plan", "__version__"]\n')
+        '__all__ = ["Target", "PlanningRequest", "PlanningResponse", "PlanStep", "PickupStop", "plan",\n'
+        '           "EscapeResponse", "plan_escape", "__version__"]\n')
     geometry = package / "_geometry"
     geometry.mkdir()
     for name in ("__init__.py", "scene.py", "config.py", "control.py"):
@@ -40,7 +43,7 @@ def build(output: Path):
     original_world = yaml.safe_load((root / "sim" / "src" / "route_plan_sim" / "world.yaml").read_text())
     minimal_world = {"world": {key: original_world["world"][key] for key in ("width", "height", "step_time")},
                      "robot": {"state": original_world["robot"]["state"]},
-                     "custom": {"random_count": 0, "rule_version": original_world["custom"].get("rule_version", 2),
+                     "custom": {"random_count": 0, "rule_version": original_world["custom"]["rule_version"],
                                 "seed": original_world["custom"]["seed"],
                                 "target_diameter": original_world["custom"]["target_diameter"]}}
     (geometry / "world.yaml").write_text(yaml.safe_dump(minimal_world), encoding="utf-8")

@@ -10,10 +10,12 @@ from route_plan_sim import Scene
 from route_plan_planner import PlannerOptions, StaticPlanner, replay
 from route_plan_planner.records import describe_scene, read_json, restore_scene
 
+PREVIOUS_ROBOT = Path(__file__).resolve().parents[2] / "sim/tests/fixtures/robot-v0.2.4.yaml"
+
 
 class CirclePlanningTest(unittest.TestCase):
     def empty(self, diameter=.1):
-        scene = Scene(target_diameter=diameter)
+        scene = Scene(target_diameter=diameter, robot_config=PREVIOUS_ROBOT)
         scene.targets.clear()
         return scene
 
@@ -91,8 +93,8 @@ class CirclePlanningTest(unittest.TestCase):
             self.assertEqual([case["seed"] for case in summary["cases"]], [42, 7])
             self.assertEqual(summary["geometry"]["target_shape"], "circle")
             self.assertEqual(summary["geometry"]["target_diameter"], .1)
-            self.assertEqual(summary["geometry"]["dimensions"]["collector_width"], .35)
-            self.assertEqual(summary["geometry"]["dimensions"]["collector_depth"], .24)
+            self.assertAlmostEqual(summary["geometry"]["dimensions"]["collector_width"], .180)
+            self.assertAlmostEqual(summary["geometry"]["dimensions"]["collector_depth"], .090)
             for case in summary["cases"]:
                 a = read_json(output / f"A-{case['case']}.json")
                 b = read_json(output / f"B-{case['case']}.json")

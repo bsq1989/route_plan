@@ -1,7 +1,7 @@
-"""Budgeted lexicographic minimization of pickup stops, then travel distance."""
+"""Budgeted minimization of executable pickup stops."""
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import time
 
@@ -9,7 +9,30 @@ from route_plan_sim import Scene
 from route_plan_sim.scene import EPS, normalize
 
 from .core import PlannerOptions, PlanResult, StaticPlanner
-from .motion import DirectMotion, compact_goals, execute, path_length, replay
+from .motion import MIN_ROTATION, MIN_TRANSLATION, DirectMotion, compact_goals, execute, path_length, replay, steer
+
+STOPS_METHOD = "stop-cover-beam-v2"
+
+
+def _connect_proposals(scene, proposals, connector, fallback, deadline, stats, trial_budget):
+    found = False
+    for motion, poses in ((connector, proposals), (fallback, proposals[:2])):
+        if found:
+            return
+        if motion is None:
+            continue
+        for pose in poses:
+            if time.monotonic() >= deadline or stats["trials"] >= trial_budget:
+                return
+            stats["trials"] += 1
+            if motion is fallback:
+                stats["ompl_calls"] += 1
+            transition = motion.connect(scene, pose, deadline)
+            if transition is not None:
+                if motion is fallback:
+                    stats["ompl_connections"] += 1
+                found = True
+                yield transition
 
 
 def at_stop_scene(scene: Scene) -> Scene:
@@ -96,6 +119,65 @@ def materialize_stops(scene: Scene, initial: PlanResult) -> PlanResult:
     return result
 
 
+def _past_deadband(start, goal):
+    """Shift a short move or turn just beyond the deadband for a coverage retry."""
+    x, y, yaw = goal
+    distance = math.dist(start[:2], goal[:2])
+    if EPS < distance <= MIN_TRANSLATION + EPS:
+        scale = 1.2 * MIN_TRANSLATION / distance
+        return start[0] + scale * (x - start[0]), start[1] + scale * (y - start[1]), yaw
+    rotation = normalize(yaw - start[2])
+    if distance <= EPS and EPS < abs(rotation) <= MIN_ROTATION + EPS:
+        return start[0], start[1], normalize(start[2] + math.copysign(1.2 * MIN_ROTATION, rotation))
+    return None
+
+
+def _executable_seed(root, seed, connector, deadline):
+    """Keep the contact-derived pickup poses, reconnecting invalid motion."""
+    current = root.clone()
+    goals, stops = [], []
+    start = 0
+    for stop in seed.pickup_stops:
+        end = stop["goal_index"] + 1
+        segment = seed.goals[start:end]
+        start = end
+        trial = current.clone()
+        try:
+            execute(trial, segment, minimum_motion=True)
+        except ValueError:
+            trial = None
+        expected = set(stop["target_ids"])
+        if trial is None or trial.failure:
+            goal = segment[-1]
+            shifted = _past_deadband(current.pose, goal)
+            transition = steer(current, shifted, minimum_motion=True) if shifted else None
+            if transition is None or set(transition.scene.clone().collect_at_stop()) != expected:
+                transition = connector.connect(current, goal, deadline)
+            if transition is None:
+                # Preserve usable intermediate poses from the contact plan.
+                for pose in segment[:-1]:
+                    intermediate = connector.connect(current, pose, deadline)
+                    if intermediate is not None:
+                        goals.extend(compact_goals(current.pose, intermediate.goals))
+                        current = intermediate.scene
+                transition = connector.connect(current, goal, deadline)
+                if transition is None:
+                    return None
+            trial = transition.scene
+            segment = compact_goals(current.pose, transition.goals) or [tuple(trial.pose)]
+        if set(trial.collect_at_stop()) != expected:
+            return None
+        current = trial
+        goals.extend(segment)
+        stops.append({**stop, "goal_index": len(goals) - 1, "pose": tuple(goals[-1])})
+    if current.targets:
+        return None
+    result = deepcopy(seed)
+    result.goals, result.pickup_stops = goals, stops
+    result.length = path_length(root.pose, goals)
+    return result
+
+
 @dataclass(frozen=True)
 class _Candidate:
     pose: tuple[float, float, float]
@@ -121,7 +203,7 @@ class StopsPlanner:
         far = scene.collector.xmax - .015
         depths = sorted({far, (near + far) / 2, near})
         offset = (scene.collector.ymin + scene.collector.ymax) / 2
-        poses = {tuple(stop["pose"]) for stop in incumbent.pickup_stops}
+        poses = {tuple(stop["pose"]) for stop in incumbent.pickup_stops} if incumbent else set()
         poses.add(tuple(scene.pose))
         for tx, ty in sorted(anchors):
             angles = [scene.pose[2], math.atan2(ty - scene.pose[1], tx - scene.pose[0])]
@@ -160,39 +242,56 @@ class StopsPlanner:
         root = at_stop_scene(scene)
         if initial is None:
             contact = center_contact_scene(scene)
-            initial = StaticPlanner(self.options).plan(contact)
-        if initial.status != "success":
-            return deepcopy(initial)
-        try:
-            best = materialize_stops(root, initial)
-        except ValueError as error:
-            return PlanResult("replay_failed", reason=str(error), remaining=len(root.targets))
-        baseline_count, baseline_length = len(best.pickup_stops), best.length
-        stats = {"method": "stop-cover-beam-v1", "objective": ["pickup_stop_count", "translation_length_m"],
+            # A contact solution is optional. Keep the seed cheap and reserve
+            # time, trials and OMPL detours for executable stops.
+            seed_options = replace(self.options, timeout=self.options.timeout / 3 or self.options.timeout,
+                                   max_trials=max(1, self.options.max_trials // 3),
+                                   max_expansions=max(1, self.options.max_expansions // 3), ompl=False)
+            initial = StaticPlanner(seed_options).plan(contact)
+        connector = DirectMotion(minimum_motion=True)
+        seed = best = None
+        if initial.status == "success":
+            try:
+                seed = materialize_stops(root, initial)
+            except ValueError:
+                pass
+            if seed is not None:
+                best = _executable_seed(root, seed, connector, deadline)
+        baseline_count = len(best.pickup_stops) if best else None
+        baseline_length = best.length if best else None
+        stats = {"method": STOPS_METHOD, "objective": ["pickup_stop_count"],
                  "pickup_rule": "center",
+                 "seed_status": initial.status, "seed_elapsed": initial.elapsed,
                  "baseline_stop_count": baseline_count, "baseline_length": baseline_length,
                  "stop_count": baseline_count, "improvements": 0, "global_optimal": False,
-                 "candidate_count": 0, "trials": 0, "expanded": 0, "termination": "candidates_exhausted"}
-        best.optimization = stats
+                 "candidate_count": 0, "trials": 0, "expanded": 0, "ompl_calls": 0, "ompl_connections": 0,
+                 "termination": "candidates_exhausted"}
         pool_deadline = min(deadline, time.monotonic() + max(0., deadline - time.monotonic()) * .3)
-        pool = self._pool(root, pool_deadline, best)
+        pool = self._pool(root, pool_deadline, seed)
         stats["candidate_count"] = len(pool)
-        connector = DirectMotion()
+        # With no contact route to supply pickup poses, retain more approaches.
+        wide_search = seed is None
+        beam_width, approaches_per_batch, proposal_limit = (8, 20, 260) if wide_search else (4, 3, 64)
         fallback = None
         if self.options.ompl:
             from .ompl_motion import OmplMotion
-            fallback = OmplMotion(min(.15, self.options.ompl_seconds), self.options.seed)
-        layer = [(root, [], [], 0.)]
+            fallback = OmplMotion(min(.15, self.options.ompl_seconds), self.options.seed, minimum_motion=True)
+        layer = [(root, [], [])]
         seen = {}
+        ompl_only = False
         trial_budget = max(0, self.options.max_trials - initial.trials)
         expansion_budget = max(0, self.options.max_expansions - initial.expanded)
         while (layer and time.monotonic() < deadline and stats["trials"] < trial_budget
                and stats["expanded"] < expansion_budget):
             next_layer = []
-            for current, goals, stops, cost in layer:
+            # When there is no seed, try the whole layer with direct/staged
+            # approaches before spending time on random detours.
+            direct = None if ompl_only else connector
+            local_fallback = fallback if ompl_only or not wide_search else None
+            for current, goals, stops in layer:
                 if time.monotonic() >= deadline or stats["expanded"] >= expansion_budget:
                     break
-                if len(stops) >= len(best.pickup_stops):
+                if best is not None and len(stops) + 1 >= len(best.pickup_stops):
                     continue
                 stats["expanded"] += 1
                 remaining = frozenset(current.targets)
@@ -206,19 +305,12 @@ class StopsPlanner:
                     bucket.append((distance, candidate.pose))
                 proposals = []
                 for coverage, values in choices.items():
-                    for distance, pose in sorted(values)[:3]:
+                    for distance, pose in sorted(values)[:approaches_per_batch]:
                         proposals.append((-len(coverage), distance, pose))
                 proposals.sort()
                 accepted = 0
-                for _, _, pose in proposals[:64]:
-                    if time.monotonic() >= deadline or stats["trials"] >= trial_budget:
-                        break
-                    stats["trials"] += 1
-                    transition = connector.connect(current, pose, deadline)
-                    if transition is None and fallback and accepted == 0 and stats["trials"] % 24 == 0:
-                        transition = fallback.connect(current, pose, deadline)
-                    if transition is None:
-                        continue
+                poses = [pose for _, _, pose in proposals[:proposal_limit]]
+                for transition in _connect_proposals(current, poses, direct, local_fallback, deadline, stats, trial_budget):
                     child = transition.scene
                     removed = child.collect_at_stop()
                     if not removed:
@@ -229,33 +321,51 @@ class StopsPlanner:
                     child_goals = goals + segment
                     child_stops = stops + [{"goal_index": len(child_goals) - 1, "pose": tuple(child_goals[-1]),
                                             "target_ids": list(removed)}]
-                    child_cost = cost + path_length(current.pose, segment)
                     if not child.targets:
-                        objective = (len(child_stops), child_cost)
-                        incumbent = (len(best.pickup_stops), best.length)
-                        if objective[0] < incumbent[0] or objective[0] == incumbent[0] and objective[1] < incumbent[1] - 1e-8:
-                            checked = replay(root, child_goals, pickup_stops=child_stops)
+                        if best is None or len(child_stops) < len(best.pickup_stops):
+                            try:
+                                checked = replay(root, child_goals, pickup_stops=child_stops, minimum_motion=True)
+                            except ValueError:
+                                continue
                             if not checked.failure and not checked.targets:
-                                best.goals, best.pickup_stops, best.length = child_goals, child_stops, child_cost
-                                best.final = checked.snapshot()
+                                best = deepcopy(initial)
+                                best.status, best.reason = "success", None
+                                best.diagnostic = None
+                                best.goals, best.pickup_stops = child_goals, child_stops
                                 stats["improvements"] += 1
                         continue
                     key = StaticPlanner._key(child, 0)
-                    value = (len(child_stops), child_cost)
+                    value = len(child_stops)
                     if key in seen and seen[key] <= value:
                         continue
                     seen[key] = value
                     maximum = max((len(candidate.covered & child.targets.keys()) for candidate in pool), default=1)
                     estimate = len(child_stops) + math.ceil(len(child.targets) / max(1, maximum))
-                    next_layer.append((estimate, len(child.targets), child_cost, child, child_goals, child_stops))
+                    next_layer.append((estimate, len(child.targets), child, child_goals, child_stops))
                     accepted += 1
-                    if accepted >= 4:
+                    if accepted >= beam_width:
                         break
-            next_layer.sort(key=lambda item: item[:3])
-            layer = [(child, goals, stops, cost) for _, _, cost, child, goals, stops in next_layer[:4]]
+            if wide_search and not next_layer and best is None and fallback is not None and not ompl_only:
+                ompl_only = True
+                continue
+            ompl_only = False
+            next_layer.sort(key=lambda item: item[:2])
+            layer = [(child, goals, stops) for _, _, child, goals, stops in next_layer[:beam_width]]
+        if best is None:
+            exhausted = (time.monotonic() >= deadline or stats["trials"] >= trial_budget
+                         or stats["expanded"] >= expansion_budget)
+            status = "budget_exhausted" if exhausted else "not_found"
+            stats["termination"] = status
+            return PlanResult(status, reason="No complete pickup plan satisfies the motion deadband",
+                              remaining=len(root.targets), optimization=stats,
+                              elapsed=shared_elapsed + time.monotonic() - started,
+                              trials=initial.trials + stats["trials"], expanded=initial.expanded + stats["expanded"])
         if time.monotonic() >= deadline:
             stats["termination"] = "budget_exhausted_kept_incumbent"
-        checked = replay(root, best.goals, dt=.013, pickup_stops=best.pickup_stops)
+        try:
+            checked = replay(root, best.goals, dt=.013, pickup_stops=best.pickup_stops, minimum_motion=True)
+        except ValueError as error:
+            return PlanResult("replay_failed", reason=str(error), remaining=len(root.targets))
         if checked.failure or checked.targets:
             return PlanResult("replay_failed", reason="Final pickup-stop replay failed", remaining=len(checked.targets))
         best.final = checked.snapshot()
@@ -264,7 +374,9 @@ class StopsPlanner:
         best.elapsed = shared_elapsed + time.monotonic() - started
         best.trials = initial.trials + stats["trials"]
         best.expanded = initial.expanded + stats["expanded"]
+        best.ompl_calls = initial.ompl_calls + stats["ompl_calls"]
+        best.ompl_connections = initial.ompl_connections + stats["ompl_connections"]
+        best.optimization = stats
         stats["stop_count"] = len(best.pickup_stops)
-        stats["saved_stops"] = baseline_count - len(best.pickup_stops)
-        stats["saved_length"] = baseline_length - best.length
+        stats["saved_stops"] = baseline_count - len(best.pickup_stops) if baseline_count is not None else None
         return best

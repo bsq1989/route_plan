@@ -5,17 +5,21 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from route_plan_sim import Scene
 from route_plan_planner import PlannerOptions, StaticPlanner, StopsPlanner, plan
-from route_plan_planner.motion import replay
+from route_plan_planner.core import PlanResult
+from route_plan_planner.motion import MIN_ROTATION, MIN_TRANSLATION, replay, steer
 from route_plan_planner.records import describe_scene, restore_scene
 from route_plan_planner.stops import at_stop_scene, center_contact_scene, materialize_stops
+
+PREVIOUS_ROBOT = Path(__file__).resolve().parents[2] / "sim/tests/fixtures/robot-v0.2.4.yaml"
 
 
 class PickupStopsTest(unittest.TestCase):
     def scene(self, points):
-        scene = Scene()
+        scene = Scene(robot_config=PREVIOUS_ROBOT)
         scene.targets.clear()
         scene.add_targets(points)
         return scene
@@ -69,8 +73,63 @@ class PickupStopsTest(unittest.TestCase):
         seed.elapsed = 100.
         result = StopsPlanner(PlannerOptions(timeout=.1, ompl=False)).plan(scene, initial=seed)
         self.assertEqual(result.status, "success", result.reason)
-        self.assertEqual(result.goals, expected.goals)
-        self.assertEqual(result.pickup_stops, expected.pickup_stops)
+        self.assertEqual([stop["target_ids"] for stop in result.pickup_stops],
+                         [stop["target_ids"] for stop in expected.pickup_stops])
+        with self.assertRaisesRegex(ValueError, "deadband"):
+            replay(at_stop_scene(scene), expected.goals, pickup_stops=expected.pickup_stops, minimum_motion=True)
+        final = replay(at_stop_scene(scene), result.goals, pickup_stops=result.pickup_stops, minimum_motion=True)
+        self.assertFalse(final.targets)
+        self.assertIsNone(final.failure)
+
+    def test_contact_seed_exhaustion_leaves_budget_for_executable_search(self):
+        scene = at_stop_scene(self.scene([(5, 4.5), (6, 4.5)]))
+        options = PlannerOptions(timeout=1., max_trials=120, max_expansions=30, ompl=False)
+        with patch("route_plan_planner.stops.StaticPlanner") as seed_planner:
+            def exhaust_seed(_scene):
+                seed_options = seed_planner.call_args.args[0]
+                self.assertLess(seed_options.timeout, options.timeout)
+                return PlanResult("budget_exhausted", elapsed=seed_options.timeout,
+                                  trials=seed_options.max_trials, expanded=seed_options.max_expansions)
+
+            seed_planner.return_value.plan.side_effect = exhaust_seed
+            result = StopsPlanner(options).plan(scene)
+
+        self.assertEqual(result.status, "success", result.reason)
+        self.assertIsNone(result.optimization["baseline_stop_count"])
+        self.assertEqual(result.optimization["seed_status"], "budget_exhausted")
+        final = replay(scene, result.goals, pickup_stops=result.pickup_stops, minimum_motion=True)
+        self.assertFalse(final.targets)
+        self.assertIsNone(final.failure)
+
+    def test_replay_rejects_small_translation_and_each_small_turn(self):
+        scene = at_stop_scene(self.scene([]))
+        x, y, yaw = scene.pose
+        for goal in ((x + MIN_TRANSLATION, y, yaw), (x, y, yaw - MIN_ROTATION),
+                     (x + 1, y + .01, yaw + .1), (x + 1, y, yaw + MIN_ROTATION)):
+            with self.subTest(goal=goal), self.assertRaisesRegex(ValueError, "deadband"):
+                replay(scene, [goal], minimum_motion=True)
+
+    def test_small_turn_can_be_reached_with_two_legal_turns(self):
+        scene = at_stop_scene(self.scene([]))
+        goal = (*scene.pose[:2], scene.pose[2] - MIN_ROTATION)
+        transition = steer(scene, goal, minimum_motion=True)
+        self.assertIsNotNone(transition)
+        final = replay(scene, transition.goals, minimum_motion=True)
+        self.assertAlmostEqual(final.pose[2], goal[2])
+        self.assertIsNone(final.failure)
+
+    def test_nearby_pickup_replans_to_a_legal_move(self):
+        scene = at_stop_scene(self.scene([]))
+        scene.add_target(3.62, 4.5)
+        result = StopsPlanner(PlannerOptions(timeout=1., ompl=False)).plan(scene)
+        self.assertEqual(result.status, "success", result.reason)
+        self.assertEqual(result.optimization["objective"], ["pickup_stop_count"])
+        self.assertEqual(len(result.pickup_stops), 1)
+        self.assertGreater(result.length, MIN_TRANSLATION)
+        self.assertLess(result.length, .1)
+        final = replay(scene, result.goals, pickup_stops=result.pickup_stops, minimum_motion=True)
+        self.assertIsNone(final.failure)
+        self.assertFalse(final.targets)
 
     def test_rotation_contact_materializes_at_analytic_pose(self):
         scene = self.scene([(3.45, 4.8)])
@@ -85,6 +144,7 @@ class PickupStopsTest(unittest.TestCase):
 
     def test_api_returns_portable_stop_checkpoints_and_all_original_ids(self):
         request = dict(width=12, height=9, pose=[3, 4.5, 0], method="stops", timeout=1, use_ompl=False,
+                       robot_config=PREVIOUS_ROBOT,
                        targets=[dict(id="a", x=5, y=4.35), dict(id=205, x=5.1, y=4.5),
                                 dict(id="c", x=5.2, y=4.65)])
         result = plan(request)
@@ -106,6 +166,22 @@ class PickupStopsTest(unittest.TestCase):
         final = replay(restored, result.goals, pickup_stops=result.pickup_stops)
         self.assertFalse(final.targets)
         self.assertIsNone(final.failure)
+
+    def test_archive_replay_uses_the_recorded_mounting_rule(self):
+        record = describe_scene(at_stop_scene(self.scene([])))
+        record["vehicle_config"]["collector"]["gap"] = .23
+        for version, expected_gap in ((None, .23), (2, .10), (3, .23)):
+            with self.subTest(version=version):
+                archive = json.loads(json.dumps(record))
+                custom = archive["world_config"]["custom"]
+                if version is None:
+                    del custom["rule_version"]
+                else:
+                    custom["rule_version"] = version
+                restored = restore_scene(archive)
+                self.assertAlmostEqual(restored.collector_gap, expected_gap)
+                self.assertAlmostEqual(restored.collector.xmin, .25 + expected_gap)
+                self.assertAlmostEqual(describe_scene(restored)["vehicle_config"]["collector"]["gap"], expected_gap)
 
     def test_circle_tangency_and_partial_overlap_do_not_count_as_coverage(self):
         for dx, dy in ((.05, 0), (.02, 0), (.03, .025)):
@@ -129,7 +205,7 @@ class PickupStopsTest(unittest.TestCase):
     def test_api_overlapping_batch_changes_pose_until_all_centers_fit(self):
         targets = [dict(id="inside", x=3.58, y=4.5), dict(id="outside", x=3.61, y=4.5)]
         result = plan(dict(width=12, height=9, pose=[3, 4.5, 0], targets=targets,
-                           method="stops", timeout=1., use_ompl=False))
+                           method="stops", timeout=1., use_ompl=False, robot_config=PREVIOUS_ROBOT))
         self.assertTrue(result.success, result.reason)
         self.assertEqual(result.stop_count, 1)
         self.assertNotEqual(result.pickup_stops[0].pose, (3, 4.5, 0))

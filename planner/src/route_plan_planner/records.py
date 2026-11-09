@@ -13,13 +13,15 @@ from route_plan_sim import Scene
 
 def describe_scene(scene: Scene) -> dict:
     custom = scene.config["custom"]
+    body = {"length": scene.dimensions["body_length"], "width": scene.dimensions["body_width"],
+            "pose_reference": "body_center", "rotation_center": "body_center"}
+    if "body_height" in custom:
+        body["height"] = custom["body_height"]
     return {
         "world_config": deepcopy(scene.config),
         "vehicle_config": {
             "version": 1, "units": "m",
-            "body": {"length": scene.dimensions["body_length"],
-                     "width": scene.dimensions["body_width"],
-                     "pose_reference": "body_center", "rotation_center": "body_center"},
+            "body": body,
             "collector": dict(custom["collector"]),
             "safety": {"body_margin": scene.body_margin},
             "motion": {"forward_speed": custom["forward_speed"],
@@ -70,7 +72,14 @@ def restore_scene(record: dict) -> Scene:
     scene._next_id = max([0, *scene.targets, *scene.collected]) + 1
     scene.scenario = state["scenario"]
     # Retain the stored source configuration for subsequent record exports.
+    collector = scene.config["custom"]["collector"]
+    height = scene.config["custom"].get("body_height")
     scene.config = deepcopy(record["world_config"])
+    scene.config["custom"]["collector"] = collector
+    if height is None:
+        scene.config["custom"].pop("body_height", None)
+    else:
+        scene.config["custom"]["body_height"] = height
     scene.config["custom"]["target_diameter"] = diameter
     scene.config["custom"]["rule_version"] = scene.rule_version
     scene.config["custom"]["pickup_rule"] = scene.pickup_rule

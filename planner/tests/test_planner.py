@@ -93,7 +93,8 @@ class StaticBaselineTest(unittest.TestCase):
         self.assertIsNone(scene.failure)
 
     def test_rotation_can_collect_without_translation(self):
-        scene = self.empty()
+        scene = Scene(robot_config=Path(__file__).resolve().parents[2] / "sim/tests/fixtures/robot-v0.2.4.yaml")
+        scene.targets.clear()
         scene.add_target(3.45, 4.8)
         self.assertEqual(len(scene.targets), 1)
         final = replay(scene, [(3, 4.5, .5)])
@@ -120,6 +121,7 @@ class StaticBaselineTest(unittest.TestCase):
         record = json.loads(json.dumps(describe_scene(scene)))
         restored = restore_scene(record)
         self.assertEqual(restored.snapshot(), scene.snapshot())
+        self.assertEqual(describe_scene(restored)["vehicle_config"]["body"]["height"], .169)
         result = StaticPlanner().plan(restored)
         self.assertEqual(result.status, "success")
         final = replay(restored, result.goals)

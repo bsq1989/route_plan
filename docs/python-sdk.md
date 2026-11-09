@@ -1,6 +1,6 @@
 # 纯算法 Python SDK 交付与使用
 
-独立分发包为 `route-plan-sdk 0.2.1`，导入名为 `route_plan_sdk`。它提供静态场景的任务规划与路径长度优化，输入普通业务数据，不要求调用方构建 `Scene` 或提供仿真界面配置。
+独立分发包为 `route-plan-sdk 0.2.5`，导入名为 `route_plan_sdk`。输入静态场景、车辆位姿和目标，返回有序位姿与拾取安排。
 
 包内只包含算法和规划必需的私有几何校验内核。不包含 IR-SIM、绘图、动画、交互窗口、演示入口或实车控制功能。该内核与仓库内的几何规则同源，在打包时复制到私有命名空间，避免另行维护一套碰撞实现。
 
@@ -10,9 +10,9 @@
 
 | 文件 | 用法 |
 | --- | --- |
-| `route_plan_sdk-0.2.1-py3-none-any.whl` | 在其他工程的 Python 环境中直接安装 |
-| `route_plan_sdk-0.2.1.tar.gz` | 标准源码分发包，可直接 pip 安装 |
-| `route_plan_sdk-0.2.1-source.zip` | 解压后可查看、修改源码，含完整说明与两个 example |
+| `route_plan_sdk-0.2.5-py3-none-any.whl` | 在其他工程的 Python 环境中直接安装 |
+| `route_plan_sdk-0.2.5.tar.gz` | 标准源码分发包，可直接 pip 安装 |
+| `route_plan_sdk-0.2.5-source.zip` | 解压后可查看、修改源码，含完整说明与调用示例 |
 | `SHA256SUMS` | 核对所交付文件的 SHA-256 |
 
 无需安装原仓库的 `sim/` 或 `planner/` 包，也无需配置 `PYTHONPATH`。源代码包中包含默认车辆 YAML，默认尺寸直接来自构建时的 `sim/config/robot.yaml`，不在 API 中重复硬编码。
@@ -28,13 +28,13 @@ v0.1.1 热修复通过 69 项仿真测试和 44 项规划器测试。安装后�
 ```bash
 python3.10 -m venv .venv
 source .venv/bin/activate
-python -m pip install /完整路径/route_plan_sdk-0.2.1-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.5-py3-none-any.whl
 
 # 或在源码解压目录执行
 python -m pip install .
 
 # 需要在其他工程中修改本地源码时
-python -m pip install -e /完整路径/route-plan-sdk-0.2.1
+python -m pip install -e /完整路径/route-plan-sdk-0.2.5
 ```
 
 Windows PowerShell 的环境激活命令为 `.venv\Scripts\Activate.ps1`，安装命令相同。具体 OMPL 平台可用性以目标环境实际安装为准。
@@ -74,9 +74,9 @@ else:
 
 坐标单位为米，yaw 为弧度。`frame_id` 只作关联标识，不执行坐标转换。物体 ID 支持非空字符串和整数，并保持原类型；重复 ID 会报错。v0.1.1 起允许圆心重合及目标圆重叠，重叠连通组一次清除，消除器接触任意成员即在同一步返回整组原始 ID。仅相切不分组。碰撞按清除前全部成员圆的并集检查，车身先接触或同时接触仍判碰撞。初始接触也按整组处理，输入顺序不影响分组。
 
-v0.1.2 起，车头到消除区的间距统一使用 `body_margin`，消除区宽深不变。正前方外扩区与左右、后方采用同一碰撞规则，圆接触安全矩形即失败，碰撞优先。无需配置独立 `gap`，旧输入字段兼容读取，响应车型中 `collector.gap` 返回实际推导值。新场景规则版本为 2；历史归档按记录版本回放。
+v0.2.4 起，`robot_config.collector.gap` 设置车头到消除区后沿的距离，独立于 `safety.body_margin`，取非负米数。自定义车型省略 `gap` 时使用 `body_margin`，响应车型返回实际间距。车身安全外扩仍检查四周，圆接触安全矩形时碰撞优先。新场景使用规则版本 3，历史归档按记录版本回放。
 
-v0.2.0 新增 `method="stops"`：全部清除且安全是硬条件，先优化拾取停靠次数，再优化路程。新增 `pickup_stops` 和 `stop_count` 输出，`goal_index` 从 0 开始对应 `goals`。到达指定完整位姿后一起处理 `target_ids`；途中和转向不自动消除，所有目标在停靠前仍参与碰撞检查，不能把沿途先后经过多个目标算作一次停车。输入字段和默认 `method="length"` 保持兼容，启用新功能需要显式选择 `stops`。详见 [SDK v0.2.0 发版说明](releases/sdk-v0.2.0.md)。
+实车停靠使用 `method="stops"`。在全部清除且安全的基础上优化拾取停靠次数，路程作为结果统计。v0.2.2 起，任何实际平移大于 5 cm、任何实际转向大于 1°。`pickup_stops[].goal_index` 从 0 开始对应 `goals`，到达完整位姿后一起处理其 `target_ids`。目标在停靠前持续参与碰撞检查。起始位姿已覆盖目标时，可以在起点原地拾取。
 
 v0.2.1 收紧停靠覆盖条件：同批每个 ID 的圆心必须位于消除矩形内，圆边缘相切或相交而圆心在外均不算覆盖；不要求整个圆进入。即使目标彼此重叠，也不清除区域外的圆心。碰撞继续使用完整物理半径。候选、初解、显式拾取及回放使用同一圆心条件，旧 v0.2.0 的相切覆盖统计不能作为本版验证。新记录保存 `pickup_rule="center"`，旧归档缺少该字段时保留旧接触规则回放。参见 [v0.2.1 修正版](releases/sdk-v0.2.1.md)。
 

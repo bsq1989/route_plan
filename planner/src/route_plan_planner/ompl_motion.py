@@ -5,20 +5,20 @@ allowed in the final approach and is propagated back to the task search. This
 keeps tree states Markovian without pretending a fixed SE2 tree models deletions.
 """
 
-import math
 import time
 
 from route_plan_sim import Scene
 
-from .motion import Pose, Transition, steer
+from .motion import Pose, Transition, staging_pose, steer
 
 _rng_initialized = False
 
 
 class OmplMotion:
-    def __init__(self, seconds: float = .4, seed: int = 42):
+    def __init__(self, seconds: float = .4, seed: int = 42, *, minimum_motion: bool = False):
         self.seconds = seconds
         self.seed = seed
+        self.minimum_motion = minimum_motion
 
     def connect_pose(self, scene: Scene, goal: Pose, deadline: float) -> Transition | None:
         from ompl import base as ob, geometric as og, util as ou
@@ -58,9 +58,11 @@ class OmplMotion:
         setup = og.SimpleSetup(space)
         setup.setStateValidityChecker(valid)
 
+        minimum_motion = self.minimum_motion
+
         class Validator(ob.MotionValidator):
             def checkMotion(self, start, end):
-                transition = steer(at(start), pose(end))
+                transition = steer(at(start), pose(end), minimum_motion=minimum_motion)
                 return bool(transition and transition.scene.targets == scene.targets)
 
         validator = Validator(setup.getSpaceInformation())
@@ -84,7 +86,7 @@ class OmplMotion:
         trial = scene.clone()
         goals = []
         for state in setup.getSolutionPath().getStates()[1:]:
-            transition = steer(trial, pose(state))
+            transition = steer(trial, pose(state), minimum_motion=minimum_motion)
             if transition is None or transition.scene.targets != scene.targets:
                 return None
             trial = transition.scene
@@ -93,13 +95,11 @@ class OmplMotion:
 
     def connect(self, scene: Scene, goal: Pose, deadline: float) -> Transition | None:
         # Approach from a staging pose outside the collector's contact region.
-        distance = max(scene.dimensions["body_length"], scene.dimensions["collector_depth"])
-        x, y, yaw = goal
-        staging = (x - distance * math.cos(yaw), y - distance * math.sin(yaw), yaw)
+        staging = staging_pose(scene, goal, minimum_motion=self.minimum_motion)
         reposition = self.connect_pose(scene, staging, deadline)
         if reposition is None:
             return None
-        approach = steer(reposition.scene, goal)
+        approach = steer(reposition.scene, goal, minimum_motion=self.minimum_motion)
         if approach is None:
             return None
         return Transition(approach.scene, reposition.goals + approach.goals, "ompl")

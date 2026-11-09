@@ -177,7 +177,7 @@ class PlanningResponse:
         return result
 
 
-def _scene(request):
+def _empty_scene(request):
     profile = request.robot_config
     if not isinstance(profile, Mapping):
         path = Path(profile).expanduser() if profile is not None else default_robot_config()
@@ -198,7 +198,11 @@ def _scene(request):
             robot_path.write_text(yaml.safe_dump(profile), encoding="utf-8")
         except yaml.YAMLError as error:
             raise ValueError(f"Invalid robot_config: {error}") from error
-        scene = Scene(config=world_path, robot_config=robot_path, scenario="random", seed=request.seed)
+        return Scene(config=world_path, robot_config=robot_path, scenario="random", seed=request.seed)
+
+
+def _scene(request):
+    scene = _empty_scene(request)
     keys = scene.add_targets((target.x, target.y) for target in request.targets)
     id_map = {key: target.id for key, target in zip(keys, request.targets)}
     return scene, id_map, describe_scene(scene)["vehicle_config"]
@@ -236,7 +240,7 @@ def plan(request: PlanningRequest | Mapping) -> PlanningResponse:
             pickup_stops = {stop["goal_index"]: stop for stop in result.pickup_stops}
             for index, goal in enumerate(result.goals):
                 before = set(trace.collected)
-                execute(trace, [goal])
+                execute(trace, [goal], minimum_motion=request.method == "stops")
                 if index in pickup_stops:
                     removed = trace.collect_at_stop()
                     if set(removed) != set(pickup_stops[index]["target_ids"]):
