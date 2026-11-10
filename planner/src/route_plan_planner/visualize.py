@@ -6,8 +6,10 @@ import math
 
 from route_plan_sim import PoseController, Scene
 
+from .motion import MIN_ROTATION, MIN_TRANSLATION
 
-def _canvas(scene):
+
+def _canvas(scene, *, local=False, goals=()):
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch, Polygon
     from route_plan_sim.app import configure_chinese_font
@@ -19,6 +21,12 @@ def _canvas(scene):
     ax.set_facecolor("white")
     ax.set(xlim=(0, scene.width), ylim=(0, scene.height), aspect="equal",
            xlabel="横向位置 / 米", ylabel="纵向位置 / 米")
+    if local:
+        points = [*scene.path, *goals]
+        xs, ys = [p[0] for p in points], [p[1] for p in points]
+        pad = max(math.hypot(x, y) for rect in (scene.safety_body, scene.collector) for x, y in rect.corners) + .20
+        ax.set(xlim=(max(0, min(xs) - pad), min(scene.width, max(xs) + pad)),
+               ylim=(max(0, min(ys) - pad), min(scene.height, max(ys) + pad)))
     ax.grid(alpha=.15)
     targets = TargetCircles(ax, facecolor="#f5a623", edgecolors="#b77915", zorder=5,
                             label=f"剩余目标（直径 {scene.target_diameter * 100:g} cm）")
@@ -38,7 +46,7 @@ def _canvas(scene):
              ha="center", fontsize=9, color="#52627b")
     fig.tight_layout(rect=(0, .045, 1, 1))
 
-    def update(current):
+    def update(current, *, finished=False):
         import numpy as np
         targets.set_targets(current.targets.values(), current.target_radius)
         collected.set_offsets(np.array(list(current.collected.values())).reshape(-1, 2))
@@ -51,7 +59,10 @@ def _canvas(scene):
         heading.set_data([x, x + current.body.xmax * math.cos(yaw)],
                          [y, y + current.body.xmax * math.sin(yaw)])
         state = "发生碰撞" if current.failure else "全部清除" if not current.targets else "自动执行中"
-        prefix = f"随机种子 {current.seed}  ·  " if current.scenario == "random" else ""
+        if local and not current.failure:
+            state = "拾取完成" if finished else "接近目标"
+        prefix = ("局部修正  ·  " if local else
+                  f"随机种子 {current.seed}  ·  " if current.scenario == "random" else "")
         title.set_text(f"{prefix}{state}  ·  剩余 {len(current.targets)}  /  已消除 {len(current.collected)}")
         return current
 
@@ -59,17 +70,19 @@ def _canvas(scene):
     return fig, update
 
 
-def save_animation(scene: Scene, goals, output: Path, dt: float = .4, fps: int = 16, pickup_stops=None):
+def save_animation(scene: Scene, goals, output: Path, dt: float = .4, fps: int = 16, pickup_stops=None,
+                   *, local=False):
     import matplotlib.pyplot as plt
     from matplotlib.animation import PillowWriter
 
     if not math.isfinite(dt) or dt <= 0 or fps < 1:
         raise ValueError("Animation dt and fps must be positive")
     trial = scene.clone()
-    fig, update = _canvas(trial)
+    fig, update = _canvas(trial, local=local, goals=goals)
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    controller = PoseController(trial)
+    controller = (PoseController(trial, minimum_translation=MIN_TRANSLATION, minimum_rotation=MIN_ROTATION)
+                  if local else PoseController(trial))
     writer = PillowWriter(fps=fps)
     stops = {stop["goal_index"]: stop for stop in pickup_stops or []}
     try:
@@ -90,6 +103,8 @@ def save_animation(scene: Scene, goals, output: Path, dt: float = .4, fps: int =
                         raise ValueError("Animation pickup coverage differs from the plan")
                     update(trial)
                     writer.grab_frame()
+            if local:
+                update(trial, finished=True)
             for _ in range(16):
                 writer.grab_frame()
     finally:
@@ -97,10 +112,12 @@ def save_animation(scene: Scene, goals, output: Path, dt: float = .4, fps: int =
     return trial
 
 
-def save_snapshot(scene: Scene, output: Path):
+def save_snapshot(scene: Scene, output: Path, *, local=False):
     import matplotlib.pyplot as plt
 
-    fig, _ = _canvas(scene)
+    fig, update = _canvas(scene, local=local)
+    if local:
+        update(scene, finished=True)
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -154,7 +171,7 @@ def save_comparison(scene: Scene, a_goals, b_goals, output: Path):
         plt.close(fig)
 
 
-def show(scene: Scene, goals, display=True, pickup_stops=None):
+def show(scene: Scene, goals, display=True, pickup_stops=None, *, local=False):
     """Reuse IR-SIM's viewer; manual edits cancel the queued static plan."""
     from route_plan_sim.app import Viewer
 
@@ -164,7 +181,11 @@ def show(scene: Scene, goals, display=True, pickup_stops=None):
             self.pickup_stops = {stop["goal_index"]: stop for stop in pickup_stops or []}
             self.pending_pickup = None
             super().__init__(scene.clone(), display=display)
-            self.note("静态自动清除计划已加载。\n空格暂停，Esc 取消。")
+            if local:
+                self.motion.minimum_translation = MIN_TRANSLATION
+                self.motion.minimum_rotation = MIN_ROTATION
+            label = "局部拾取修正" if local else "静态自动清除计划"
+            self.note(f"{label}已加载。\n空格暂停，Esc 取消。")
 
         def set_goal(self, *args):
             self.pending.clear()
@@ -201,6 +222,8 @@ def show(scene: Scene, goals, display=True, pickup_stops=None):
                 if set(removed) != set(self.pending_pickup["target_ids"]):
                     raise ValueError("Viewer pickup coverage differs from the plan")
                 self.pending_pickup = None
+                if local and not self.pending:
+                    self.note(f"局部拾取完成，剩余 {len(self.scene.targets)} 个目标。")
             if self.pending and not self.command and not self.paused and not self.scene.failure:
                 index, goal = self.pending.popleft()
                 self.motion.set_goal(*goal)
@@ -208,7 +231,7 @@ def show(scene: Scene, goals, display=True, pickup_stops=None):
                 self._update_pose_fields(*goal)
                 self.note(f"自动清除中，剩余 {len(self.scene.targets)} 个目标。\n空格暂停，Esc 取消。")
             super().tick()
-            if not self.pending and not self.command and not self.scene.targets:
+            if not local and not self.pending and not self.command and not self.scene.targets:
                 self.note("全部目标已自动消除。")
 
     PlanViewer().run()

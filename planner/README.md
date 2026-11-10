@@ -1,5 +1,16 @@
 # 静态目标消除 baseline
 
+到原停靠点后，可以独立仿真最新观测下的局部拾取修正。输入 JSON 的 `pose` 是实测停车位姿，`targets` 包含更新后的拾取目标和附近未拾取物体。
+
+```bash
+uv run --project planner route-plan adjust --input planner/examples/pickup_adjustment.json \
+  --target-ids '["item-a"]' --output sim/output/adjustment/plan.json \
+  --gif sim/output/adjustment/replay.gif
+uv run --project planner route-plan replay sim/output/adjustment/plan.json --show
+```
+
+局部仿真完成本次拾取即结束，其他目标保留在场景中。`--max-displacement` 可调整车身中心距起点的最大距离，默认 0.40 米。
+
 跨工程集成可使用独立的 [纯算法 Python SDK](../docs/python-sdk.md)，无需安装仿真显示依赖，附带 Python 和 JSON 两种 example。
 
 `--method stops` 优化拾取停靠次数。一个停靠位可同时覆盖多个目标，要求每个目标圆心都在消除矩形内。每段实际平移大于 5 cm，每次实际转向大于 1°，路程作为结果统计。目标只在明确的停靠位清除，使用 `result.pickup_stops` 执行和回放。中间位姿不计入拾取停靠数。命令示例 `uv run --project planner route-plan solve --method stops --scenario random --seed 42 --timeout 3 --gif sim/output/stops.gif`。

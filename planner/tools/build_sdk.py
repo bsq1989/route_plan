@@ -23,7 +23,7 @@ def build(output: Path):
     package = destination / "src" / "route_plan_sdk"
     package.mkdir(parents=True)
     for name in ("api.py", "core.py", "length.py", "stops.py", "motion.py", "ompl_motion.py", "records.py",
-                 "escape.py"):
+                 "escape.py", "adjustment.py"):
         source = (root / "planner" / "src" / "route_plan_planner" / name).read_text()
         # Move only imports of the maintained geometry kernel into a private
         # namespace. All algorithm imports remain relative and unchanged.
@@ -33,9 +33,10 @@ def build(output: Path):
         '"""Pure algorithm SDK: static scene request -> verified map pose plan."""\n'
         'from .api import Target, PlanningRequest, PlanningResponse, PlanStep, PickupStop, plan\n'
         'from .escape import EscapeResponse, plan_escape\n'
+        'from .adjustment import plan_pickup_adjustment\n'
         f'__version__ = "{version}"\n'
         '__all__ = ["Target", "PlanningRequest", "PlanningResponse", "PlanStep", "PickupStop", "plan",\n'
-        '           "EscapeResponse", "plan_escape", "__version__"]\n')
+        '           "EscapeResponse", "plan_escape", "plan_pickup_adjustment", "__version__"]\n')
     geometry = package / "_geometry"
     geometry.mkdir()
     for name in ("__init__.py", "scene.py", "config.py", "control.py"):

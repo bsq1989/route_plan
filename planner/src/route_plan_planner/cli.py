@@ -3,12 +3,17 @@
 import argparse
 from dataclasses import asdict
 from importlib.metadata import version
+import json
+import math
 from pathlib import Path
 import platform
 import sys
 
 from route_plan_sim import Scene
+from route_plan_sim.scene import EPS
 
+from .adjustment import ADJUSTMENT_METHOD, DEFAULT_MAX_DISPLACEMENT, plan_pickup_adjustment
+from .api import PlanningRequest, _scene
 from .core import PlannerOptions, StaticPlanner
 from .length import LengthOptions, LengthPlanner
 from .stops import STOPS_METHOD, StopsPlanner
@@ -62,17 +67,19 @@ def _plan_record(scene, options, method="feasibility"):
     return result, payload
 
 
-def _render(args, scene, goals, pickup_stops=None):
+def _render(args, scene, goals, pickup_stops=None, *, local=False):
     if args.gif or args.snapshot or args.show:
         from .visualize import save_animation, save_snapshot, show
         if args.gif:
-            final = save_animation(scene, goals, args.gif, pickup_stops=pickup_stops)
-            if final.failure or final.targets:
-                raise ValueError("Animation replay did not clear the scene")
+            final = save_animation(scene, goals, args.gif, dt=.05 if local else .4,
+                                   pickup_stops=pickup_stops, local=local)
+            if final.failure or (not local and final.targets):
+                raise ValueError("Animation replay did not complete the pickup plan")
         if args.snapshot:
-            save_snapshot(replay(scene, goals, pickup_stops=pickup_stops), args.snapshot)
+            final = replay(scene, goals, pickup_stops=pickup_stops, minimum_motion=local)
+            save_snapshot(final, args.snapshot, local=local)
         if args.show:
-            show(scene, goals, pickup_stops=pickup_stops)
+            show(scene, goals, pickup_stops=pickup_stops, local=local)
 
 
 def _solve(args):
@@ -94,21 +101,60 @@ def _solve(args):
     return 1
 
 
-def _replay(args):
-    record = read_json(args.record)
+def _replay_record(args, record):
     if record.get("schema_version") != 1:
         raise ValueError("Unsupported plan record schema")
     if record["result"]["status"] != "success":
         raise ValueError("Only successful plans can be replayed")
     scene = restore_scene(record["initial"])
-    goals = [tuple(goal) for goal in record["result"]["goals"]]
-    pickup_stops = record["result"].get("pickup_stops", [])
-    final = replay(scene, goals, pickup_stops=pickup_stops, minimum_motion=record.get("planner") == STOPS_METHOD)
-    if final.failure or final.targets:
+    result = record["result"]
+    goals = [tuple(goal) for goal in result["goals"]]
+    pickup_stops = result.get("pickup_stops", [])
+    local = record.get("planner") == ADJUSTMENT_METHOD
+    if local:
+        limit = record["adjustment"]["max_displacement"]
+        if any(math.dist(scene.pose[:2], goal[:2]) > limit + EPS for goal in goals):
+            raise ValueError("Replay exceeds the local displacement limit")
+        if len(pickup_stops) != 1 or pickup_stops[0]["goal_index"] != len(goals) - 1:
+            raise ValueError("Local replay must end at exactly one pickup stop")
+    expected_remaining = set(result["remaining_ids"]) if local else set()
+    final = replay(scene, goals, pickup_stops=pickup_stops,
+                   minimum_motion=local or record.get("planner") == STOPS_METHOD)
+    if final.failure or set(final.targets) != expected_remaining:
         raise ValueError(f"Replay failed: {final.failure}; remaining={len(final.targets)}")
-    print(f"replay success: {len(scene.targets)} -> 0")
-    _render(args, scene, goals, pickup_stops)
+    print(f"replay success: {len(scene.targets)} -> {len(final.targets)}")
+    _render(args, scene, goals, pickup_stops, local=local)
     return 0
+
+
+def _replay(args):
+    return _replay_record(args, read_json(args.record))
+
+
+def _adjust(args):
+    target_ids = json.loads(args.target_ids)
+    if not isinstance(target_ids, list):
+        raise ValueError("--target-ids must be a JSON array")
+    result = plan_pickup_adjustment(read_json(args.input), target_ids, max_displacement=args.max_displacement)
+    response = result.to_dict()
+    record = {"schema_version": 1, "planner": ADJUSTMENT_METHOD, "sdk_response": response,
+              "adjustment": {"target_ids": target_ids, "max_displacement": args.max_displacement}}
+    if result.success:
+        scene, ids, _ = _scene(PlanningRequest.from_dict(result.resolved_request))
+        keys = {name: key for key, name in ids.items()}
+        stops = [{**stop, "target_ids": [keys[name] for name in stop["target_ids"]]}
+                 for stop in response["pickup_stops"]]
+        record.update(initial=describe_scene(scene),
+                      result={"status": result.status, "goals": response["goals"], "pickup_stops": stops,
+                              "remaining_ids": [keys[name] for name in result.remaining_ids]})
+    else:
+        record["result"] = {"status": result.status, "reason": result.reason}
+    write_json(args.output, record)
+    if not result.success:
+        print(f"{result.status}: {result.reason}", file=sys.stderr)
+        return 1
+    print(f"adjustment: {result.length:.3f}m; picked={result.expected_collected_ids}; record={args.output}")
+    return _replay_record(args, record)
 
 
 def _benchmark(args):
@@ -195,6 +241,11 @@ def main(argv=None):
     solve.add_argument("--output", type=Path, default=Path("sim/output/baseline/plan.json"))
     play = commands.add_parser("replay", help="按保存的尺寸和动作回放，不重新搜索")
     play.add_argument("record", type=Path)
+    adjust = commands.add_parser("adjust", help="独立规划和回放停车点的局部拾取修正")
+    adjust.add_argument("--input", type=Path, required=True, help="实测位姿和更新目标的 SDK 输入 JSON")
+    adjust.add_argument("--target-ids", required=True, help='本次要拾取的 ID，JSON 数组，例如 ["item-a"]')
+    adjust.add_argument("--max-displacement", type=float, default=DEFAULT_MAX_DISPLACEMENT)
+    adjust.add_argument("--output", type=Path, default=Path("sim/output/adjustment/plan.json"))
     batch = commands.add_parser("benchmark", help="运行两个预设及一批随机种子，逐个保存复现记录")
     batch.add_argument("--output", type=Path, default=Path("sim/output/baseline/benchmark"))
     compare = commands.add_parser("compare", help="同场景同初解对比可行性 A 与路径长度优化 B")
@@ -213,13 +264,14 @@ def main(argv=None):
         command.add_argument("--planner-seed", type=int, default=42)
     for command in (solve, batch):
         command.add_argument("--method", choices=("feasibility", "length", "stops"), default="feasibility")
-    for command in (solve, play):
+    for command in (solve, play, adjust):
         command.add_argument("--show", action="store_true", help="打开 IR-SIM 窗口自动执行，空格暂停、Esc 停止")
         command.add_argument("--snapshot", type=Path)
         command.add_argument("--gif", type=Path)
     args = parser.parse_args(argv)
     try:
-        return {"solve": _solve, "replay": _replay, "benchmark": _benchmark, "compare": _compare}[args.command](args)
+        return {"solve": _solve, "replay": _replay, "adjust": _adjust,
+                "benchmark": _benchmark, "compare": _compare}[args.command](args)
     except (ValueError, KeyError, OSError) as error:
         parser.error(str(error))
 

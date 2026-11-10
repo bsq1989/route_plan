@@ -1,6 +1,6 @@
 # Route Plan 纯算法 SDK
 
-`route-plan-sdk 0.2.5`，Python 导入名为 `route_plan_sdk`。输入静态场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。
+`route-plan-sdk 0.2.6`，Python 导入名为 `route_plan_sdk`。输入静态场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。
 
 包内包含任务规划、路径长度优化与必要的私有几何校验内核。没有 IR-SIM、窗口、绘图、动画、场景演示、ROS 或实车控制功能。无需原仓库目录或 `PYTHONPATH`，默认车型文件已随包携带。
 
@@ -29,10 +29,10 @@ source .venv/bin/activate
 python -m pip install .
 
 # 或安装提供的 SDK wheel，二者任选一个
-python -m pip install /完整路径/route_plan_sdk-0.2.5-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.6-py3-none-any.whl
 ```
 
-源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.5`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
+源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.6`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
 
 ## 最小 Python 调用
 
@@ -75,6 +75,23 @@ python examples/multi_pickup.py
 `plan_escape(request)` 接收同一份地图、当前车位、车辆配置和全部观测目标。它搜索直行、原地转向或一次转向后直行，直到所有目标都离开车身外扩区。对起始就进入外扩区的物体，实体车身必须始终有净空，且距离全程不能减小。其他物体与地图边界按常规规则检查。
 
 `EscapeResponse.goals` 是按顺序执行的位姿，`initial_intrusion_ids` 标识起始侵入物，`final_pose` 是预计脱离后的位姿。脱困期间保留全部目标。状态为 `already_clear` 时可以进入常规规划。状态为 `body_contact` 或 `blocked` 时返回空动作。执行成功后，用实测位姿和最新目标重新调用 `plan()`。
+
+## 到站后的局部拾取修正
+
+```python
+from route_plan_sdk import plan_pickup_adjustment
+
+# updated_request 的 pose 是停车后的实测位姿，targets 是最新观测的未拾取目标。
+result = plan_pickup_adjustment(updated_request, target_ids=["item-a"], max_displacement=0.40)
+if result.success:
+    print(result.goals, result.pickup_stops, result.remaining_ids)
+else:
+    print(result.status, result.reason)
+```
+
+实测位姿与目标圆心使用同一 map 坐标系。把附近其他未拾取目标也放在 `targets` 里，它们会参与全程碰撞检查。`max_displacement` 是车身中心相对起点的最大位移，单位米，默认 0.40。平移和转向沿用停靠模式的死区。
+
+成功时只返回一个拾取停靠，指定的全部 ID 都在该位姿的消除矩形内。如果它们已经在区内，可以直接原地拾取。`remaining_ids` 保留该停靠未清除的目标。目标缺失、起点侵入安全区、预算耗尽或找不到局部路线时返回空动作。拾取确认后，剩余任务用实测位姿和最新目标重新规划。
 
 ## 输入约定
 
@@ -126,7 +143,7 @@ python examples/multi_pickup.py
 
 起始位姿已经覆盖目标时，首条 `goal` 可以与起始位姿相同，并在 `pickup_stops` 中标记。执行端可在原地直接触发这次拾取。
 
-`python examples/multi_pickup.py` 演示三个非重叠目标在一个服务位姿中一次清除。停车优先可能增加行驶距离；如果主要关心路程，继续使用 `method="length"`。
+`python examples/multi_pickup.py` 演示两个非重叠目标在一个服务位姿中一次清除。
 
 `success` 与 `expected_collected_ids` 只表示该模型中的安全、清除预测，不是实车执行或拾取确认。SDK 不输出轮速、速度指令、消除器开关或机械动作，不模拟定位误差与拾取失败。
 
