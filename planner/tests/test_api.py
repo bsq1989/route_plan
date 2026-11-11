@@ -43,7 +43,7 @@ class PublicApiTest(unittest.TestCase):
         decoded = json.loads(json.dumps(result.to_dict(), allow_nan=False))
         self.assertTrue(decoded["success"])
         profile = decoded["resolved_request"]["robot_config"]
-        self.assertEqual(profile["collector"]["width"], .180)
+        self.assertEqual(profile["collector"]["width"], .190)
         self.assertEqual(profile["body"]["height"], .169)
         repeated = plan(decoded["resolved_request"])
         self.assertTrue(repeated.success)

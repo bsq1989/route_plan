@@ -12,7 +12,7 @@ body:
   rotation_center: body_center
 
 collector:
-  width: 0.180          # 左右宽度 18.0 cm
+  width: 0.190          # 左右宽度 19.0 cm
   depth: 0.090          # 前后长度 9.0 cm
   gap: 0.183            # 车头到消除区近边的距离 18.3 cm
   lateral_offset: 0.0   # 暂按左右居中，正值向车体左侧偏移

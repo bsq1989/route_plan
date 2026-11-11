@@ -26,11 +26,13 @@ class RobotConfigTest(unittest.TestCase):
 
     def test_real_robot_is_the_default_for_each_new_episode(self):
         scene = Scene()
-        for key, expected in dict(body_length=.702, body_width=.610, collector_width=.180,
+        for key, expected in dict(body_length=.702, body_width=.610, collector_width=.190,
                                   collector_depth=.090, body_margin=.050).items():
             self.assertAlmostEqual(scene.dimensions[key], expected)
         self.assertAlmostEqual(scene.config["custom"]["body_height"], .169)
         self.assertAlmostEqual(scene.collector_gap, .183)
+        self.assertAlmostEqual(scene.collector.ymin, -.095)
+        self.assertAlmostEqual(scene.collector.ymax, .095)
         self.assertAlmostEqual(scene.safety_body.xmax - scene.safety_body.xmin, .802)
         self.assertAlmostEqual(scene.safety_body.ymax - scene.safety_body.ymin, .710)
         scene.set_dimensions(**(scene.dimensions | {"body_length": .7}))
@@ -71,10 +73,10 @@ class RobotConfigTest(unittest.TestCase):
         scene = Scene(robot_config=self.write_profile())
         scene.targets.clear()
         self.assertAlmostEqual(scene.collector.xmin, .401)
-        self.assertAlmostEqual(scene.collector.ymin, -.06)
+        self.assertAlmostEqual(scene.collector.ymin, -.065)
         scene.set_dimensions(**(scene.dimensions | {"body_length": .8}))
         self.assertAlmostEqual(scene.collector.xmin, .45)
-        self.assertAlmostEqual(scene.collector.ymax, .12)
+        self.assertAlmostEqual(scene.collector.ymax, .125)
         scene.set_dimensions(**(scene.dimensions | {"body_margin": .15}))
         self.assertAlmostEqual(scene.collector_gap, .05)
         self.assertAlmostEqual(scene.collector.xmin, .45)

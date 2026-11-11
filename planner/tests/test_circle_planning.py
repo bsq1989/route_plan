@@ -93,7 +93,7 @@ class CirclePlanningTest(unittest.TestCase):
             self.assertEqual([case["seed"] for case in summary["cases"]], [42, 7])
             self.assertEqual(summary["geometry"]["target_shape"], "circle")
             self.assertEqual(summary["geometry"]["target_diameter"], .1)
-            self.assertAlmostEqual(summary["geometry"]["dimensions"]["collector_width"], .180)
+            self.assertAlmostEqual(summary["geometry"]["dimensions"]["collector_width"], .190)
             self.assertAlmostEqual(summary["geometry"]["dimensions"]["collector_depth"], .090)
             for case in summary["cases"]:
                 a = read_json(output / f"A-{case['case']}.json")
