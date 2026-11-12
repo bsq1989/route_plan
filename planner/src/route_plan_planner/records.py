@@ -31,7 +31,7 @@ def describe_scene(scene: Scene) -> dict:
     }
 
 
-def restore_scene(record: dict) -> Scene:
+def restore_scene(record: dict, *, allow_safety_intrusions: bool = False) -> Scene:
     config = deepcopy(record["world_config"])
     state = record["state"]
     if state.get("failure"):
@@ -59,9 +59,12 @@ def restore_scene(record: dict) -> Scene:
     for raw_key, point in state["remaining"].items():
         key = int(raw_key)
         remaining[key] = tuple(point)
-    scene.add_targets(remaining.values())
+    keys = scene.add_targets(remaining.values(), allow_safety_intrusions=allow_safety_intrusions)
     if scene.collected:
         raise ValueError("Remaining target group is already inside collector")
+    if scene.recovering:
+        scene._initial_intrusions = frozenset(archived for current, archived in zip(keys, remaining)
+                                              if current in scene._initial_intrusions)
     scene.targets = remaining
     scene.collected = {int(key): tuple(point) for key, point in state["collected"].items()}
     for point in scene.collected.values():

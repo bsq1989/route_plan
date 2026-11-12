@@ -105,6 +105,28 @@ class Rect:
                 return t
         return math.inf
 
+    def turn_preserves_clearance(self, px, py, angle, contact_distance=None):
+        """Check clearance at face changes and distance extrema during a turn."""
+        times = {0., 1.}
+        for edge in (self.xmin, self.xmax, 0.):
+            times.update(trig_times(px, py, edge, angle))
+        for edge in (self.ymin, self.ymax, 0.):
+            times.update(trig_times(py, -px, edge, angle))
+        for cx, cy in self.corners:
+            times.update(trig_times(cx * py - cy * px, -cx * px - cy * py, 0., angle))
+        largest = 0.
+        for t in sorted(times):
+            c, s = math.cos(angle * t), math.sin(angle * t)
+            x, y = c * px + s * py, -s * px + c * py
+            distance = math.hypot(max(self.xmin - x, 0., x - self.xmax),
+                                  max(self.ymin - y, 0., y - self.ymax))
+            if distance + EPS < largest:
+                return False
+            if contact_distance is not None and distance <= contact_distance < largest:
+                return False
+            largest = max(distance, largest)
+        return True
+
 
 class Scene:
     """Episode API. Targets are disks; touching rectangle edges counts.
@@ -257,6 +279,8 @@ class Scene:
         """Collect only disks covered at this single pose, after collision checks."""
         if self.failure:
             raise ValueError("Cannot collect after a collision")
+        if self.recovering:
+            raise ValueError("Cannot collect before clearing the initial safety intrusions")
         before = set(self.collected)
         self.advance()
         if self.failure:
@@ -269,6 +293,10 @@ class Scene:
         margin = self.body_margin
         return Rect(self.body.xmin - margin, self.body.ymin - margin,
                     self.body.xmax + margin, self.body.ymax + margin)
+
+    @property
+    def recovering(self) -> bool:
+        return bool(self._initial_intrusions & self.targets.keys())
 
     @property
     def dimensions(self) -> dict[str, float]:
@@ -331,6 +359,7 @@ class Scene:
         self.scenario = scenario or getattr(self, "scenario", "front")
         self.pose = self.initial_pose
         self.targets: dict[int, tuple[float, float]] = {}
+        self._initial_intrusions: frozenset[int] = frozenset()
         self.collected: dict[int, tuple[float, float]] = {}
         self.failure: str | None = None
         self.collision_point: tuple[float, float] | None = None
@@ -377,7 +406,7 @@ class Scene:
     def add_target(self, x: float, y: float) -> None:
         self.add_targets([(x, y)])
 
-    def add_targets(self, points) -> tuple[int, ...]:
+    def add_targets(self, points, *, allow_safety_intrusions: bool = False) -> tuple[int, ...]:
         """Atomically add an observed batch, then collect touching groups.
 
         Validate every member before initial collection, independently of input
@@ -385,16 +414,24 @@ class Scene:
         """
         if self.failure:
             raise ValueError("Reset the scene after a collision")
+        if allow_safety_intrusions and (self.collection_mode != "at_stop" or self.pickup_rule != "center"
+                                        or self.targets or self.pose != self.initial_pose):
+            raise ValueError("Recovery targets require a fresh centre-rule pickup scene")
         points = tuple((finite(x), finite(y)) for x, y in points)
         radius = self.target_radius
-        for x, y in points:
+        intrusions = set()
+        for index, (x, y) in enumerate(points):
             if not (radius + EPS < x < self.width - radius - EPS
                     and radius + EPS < y < self.height - radius - EPS):
                 raise ValueError("Target must be inside the map")
-            if self.safety_body.intersects_circle(*self.local_point(x, y), radius):
-                raise ValueError("Cannot place a target inside the robot body")
+            local = self.local_point(x, y)
+            if self.safety_body.intersects_circle(*local, radius):
+                if not allow_safety_intrusions or self.body.intersects_circle(*local, radius):
+                    raise ValueError("Cannot place a target inside the robot body")
+                intrusions.add(self._next_id + index)
         keys = tuple(range(self._next_id, self._next_id + len(points)))
         self.targets.update(zip(keys, points))
+        self._initial_intrusions |= intrusions
         self._next_id += len(points)
         if self.collection_mode == "contact":
             self._collect_at_pose()
@@ -430,6 +467,15 @@ class Scene:
                 first = min([first] + [max(0.0, t) for t in times if -EPS <= t <= 1 + EPS])
         return first
 
+    def _initial_intrusion_contact(self, x, y, distance, rotation):
+        """Allow an initially overlapping disk only while moving away from it."""
+        if distance and x > self.body.xmax:
+            return 0.
+        if rotation and (not self.body.turn_preserves_clearance(x, y, rotation)
+                         or not self.safety_body.turn_preserves_clearance(x, y, rotation, self.target_radius + EPS)):
+            return 0.
+        return self.body.first_contact(x, y, distance, rotation, self.target_radius)
+
     def advance(self, *, distance: float = 0, rotation: float = 0) -> None:
         distance, rotation = finite(distance), finite(rotation)
         if distance < 0:
@@ -448,7 +494,10 @@ class Scene:
             contacts = []
             for key in group:
                 local = self.local_point(*self.targets[key])
-                contacts.append((self.safety_body.first_contact(*local, distance, rotation, self.target_radius),
+                body_contact = (self._initial_intrusion_contact(*local, distance, rotation)
+                                if key in self._initial_intrusions else
+                                self.safety_body.first_contact(*local, distance, rotation, self.target_radius))
+                contacts.append((body_contact,
                                  (self.collector.first_contact(*local, distance, rotation, self.pickup_radius)
                                   if self.collection_mode == "contact" else math.inf), key))
             body_time, _, hit = min(contacts)
@@ -471,6 +520,11 @@ class Scene:
                      y + distance * t * math.sin(theta), normalize(theta + rotation * t))
         if self.pose[:2] != self.path[-1]:
             self.path.append(self.pose[:2])
+        if self._initial_intrusions:
+            self._initial_intrusions = frozenset(
+                key for key in self._initial_intrusions if key in self.targets
+                and self.safety_body.intersects_circle(*self.local_point(*self.targets[key]), self.target_radius)
+            )
         self.failure, self.collision_point = failure, collision_point
 
     def turn_to(self, degrees: float) -> None:

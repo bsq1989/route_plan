@@ -12,8 +12,9 @@ import sys
 from route_plan_sim import Scene
 from route_plan_sim.scene import EPS
 
-from .adjustment import ADJUSTMENT_METHOD, DEFAULT_MAX_DISPLACEMENT, plan_pickup_adjustment
-from .api import PlanningRequest, _scene
+from .adjustment import (ADJUSTMENT_METHOD, DEFAULT_MAX_DISPLACEMENT, _simulation_requests,
+                         _translate_pose, plan_pickup_adjustment)
+from .api import _scene
 from .core import PlannerOptions, StaticPlanner
 from .length import LengthOptions, LengthPlanner
 from .stops import STOPS_METHOD, StopsPlanner
@@ -85,7 +86,9 @@ def _render(args, scene, goals, pickup_stops=None, *, local=False):
 def _solve(args):
     if args.input:
         record = read_json(args.input)
-        scene = restore_scene(record.get("initial", record))
+        optimization = record.get("result", {}).get("optimization") or {}
+        recovering = args.method == "stops" and bool(optimization.get("escape_goal_count"))
+        scene = restore_scene(record.get("initial", record), allow_safety_intrusions=recovering)
     else:
         scene = Scene(config=args.config, scenario=args.scenario, seed=args.seed,
                       robot_config=args.robot_config)
@@ -106,17 +109,23 @@ def _replay_record(args, record):
         raise ValueError("Unsupported plan record schema")
     if record["result"]["status"] != "success":
         raise ValueError("Only successful plans can be replayed")
-    scene = restore_scene(record["initial"])
+    local = record.get("planner") == ADJUSTMENT_METHOD
     result = record["result"]
+    metrics = record.get("sdk_response", {}).get("metrics", {}) if local else result.get("optimization") or {}
+    escape_count = metrics.get("escape_goal_count", 0)
+    scene = restore_scene(record["initial"], allow_safety_intrusions=bool(escape_count))
     goals = [tuple(goal) for goal in result["goals"]]
     pickup_stops = result.get("pickup_stops", [])
-    local = record.get("planner") == ADJUSTMENT_METHOD
     if local:
         limit = record["adjustment"]["max_displacement"]
         if any(math.dist(scene.pose[:2], goal[:2]) > limit + EPS for goal in goals):
             raise ValueError("Replay exceeds the local displacement limit")
         if len(pickup_stops) != 1 or pickup_stops[0]["goal_index"] != len(goals) - 1:
             raise ValueError("Local replay must end at exactly one pickup stop")
+    if escape_count:
+        escaped = replay(scene, goals[:escape_count], minimum_motion=True)
+        if escaped.failure or escaped.recovering:
+            raise ValueError("Replay did not clear the initial safety intrusions")
     expected_remaining = set(result["remaining_ids"]) if local else set()
     final = replay(scene, goals, pickup_stops=pickup_stops,
                    minimum_motion=local or record.get("planner") == STOPS_METHOD)
@@ -140,12 +149,14 @@ def _adjust(args):
     record = {"schema_version": 1, "planner": ADJUSTMENT_METHOD, "sdk_response": response,
               "adjustment": {"target_ids": target_ids, "max_displacement": args.max_displacement}}
     if result.success:
-        scene, ids, _ = _scene(PlanningRequest.from_dict(result.resolved_request))
+        request, simulation = _simulation_requests(result.resolved_request, args.max_displacement)
+        scene, ids, _ = _scene(simulation, allow_safety_intrusions=bool(result.metrics.get("escape_goal_count")))
         keys = {name: key for key, name in ids.items()}
-        stops = [{**stop, "target_ids": [keys[name] for name in stop["target_ids"]]}
+        goals = [_translate_pose(goal, request.pose, simulation.pose) for goal in result.goals]
+        stops = [{**stop, "pose": goals[stop["goal_index"]], "target_ids": [keys[name] for name in stop["target_ids"]]}
                  for stop in response["pickup_stops"]]
         record.update(initial=describe_scene(scene),
-                      result={"status": result.status, "goals": response["goals"], "pickup_stops": stops,
+                      result={"status": result.status, "goals": goals, "pickup_stops": stops,
                               "remaining_ids": [keys[name] for name in result.remaining_ids]})
     else:
         record["result"] = {"status": result.status, "reason": result.reason}

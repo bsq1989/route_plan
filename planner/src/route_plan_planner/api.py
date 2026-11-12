@@ -177,15 +177,18 @@ class PlanningResponse:
         return result
 
 
-def _empty_scene(request):
-    profile = request.robot_config
+def _robot_profile(profile):
     if not isinstance(profile, Mapping):
         path = Path(profile).expanduser() if profile is not None else default_robot_config()
         try:
             profile = yaml.safe_load(path.read_text(encoding="utf-8"))
         except yaml.YAMLError as error:
             raise ValueError(f"Invalid robot_config YAML: {error}") from error
-    profile = deepcopy(profile)
+    return deepcopy(profile)
+
+
+def _empty_scene(request):
+    profile = _robot_profile(request.robot_config)
     world = {"world": {"width": request.width, "height": request.height, "step_time": .04},
              "robot": {"state": list(request.pose)},
              "custom": {"random_count": 0, "target_diameter": request.target_diameter,
@@ -201,9 +204,10 @@ def _empty_scene(request):
         return Scene(config=world_path, robot_config=robot_path, scenario="random", seed=request.seed)
 
 
-def _scene(request):
+def _scene(request, *, allow_safety_intrusions=False):
     scene = _empty_scene(request)
-    keys = scene.add_targets((target.x, target.y) for target in request.targets)
+    points = ((target.x, target.y) for target in request.targets)
+    keys = scene.add_targets(points, allow_safety_intrusions=allow_safety_intrusions)
     id_map = {key: target.id for key, target in zip(keys, request.targets)}
     return scene, id_map, describe_scene(scene)["vehicle_config"]
 
@@ -216,7 +220,7 @@ def plan(request: PlanningRequest | Mapping) -> PlanningResponse:
     """
     started = time.monotonic()
     request = request if isinstance(request, PlanningRequest) else PlanningRequest.from_dict(request)
-    scene, id_map, profile = _scene(request)
+    scene, id_map, profile = _scene(request, allow_safety_intrusions=request.method == "stops")
     initially_collected = [id_map[key] for key in scene.collected]
     options = PlannerOptions(timeout=request.timeout, ompl=request.use_ompl, seed=request.seed)
     planner = {"length": LengthPlanner, "feasibility": StaticPlanner, "stops": StopsPlanner}[request.method]
@@ -233,6 +237,9 @@ def plan(request: PlanningRequest | Mapping) -> PlanningResponse:
                                          "backtracks": result.backtracks, "ompl_calls": result.ompl_calls,
                                          "best_remaining": result.best_remaining,
                                          "planner_elapsed": result.elapsed})
+    escape_count = (result.optimization or {}).get("escape_goal_count", 0)
+    if escape_count:
+        response.metrics["escape_goal_count"] = escape_count
     if result.status == "success":
         trace = scene.clone()
         steps = []

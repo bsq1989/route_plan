@@ -61,6 +61,8 @@ def _canvas(scene, *, local=False, goals=()):
         state = "发生碰撞" if current.failure else "全部清除" if not current.targets else "自动执行中"
         if local and not current.failure:
             state = "拾取完成" if finished else "接近目标"
+        if current.recovering and not current.failure:
+            state = "脱困中"
         prefix = ("局部修正  ·  " if local else
                   f"随机种子 {current.seed}  ·  " if current.scenario == "random" else "")
         title.set_text(f"{prefix}{state}  ·  剩余 {len(current.targets)}  /  已消除 {len(current.collected)}")

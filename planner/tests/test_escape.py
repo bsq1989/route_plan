@@ -66,7 +66,7 @@ class EscapeTest(unittest.TestCase):
             with self.subTest(points=points, pose=pose):
                 request = self.request(points, pose)
                 with self.assertRaisesRegex(ValueError, "inside the robot body"):
-                    plan(request)
+                    plan(dict(request, method="length"))
                 response = plan_escape(request)
                 self.assert_escape_replays(request, response)
                 self.assertEqual(response.initial_intrusion_ids, tuple(t["id"] for t in request["targets"]))

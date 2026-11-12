@@ -2,9 +2,10 @@
 
 from dataclasses import dataclass
 import math
+import time
 from typing import Mapping
 
-from route_plan_sim.scene import EPS, normalize, trig_times
+from route_plan_sim.scene import EPS, normalize
 
 from .api import PlanningRequest, Pose, TargetId, _empty_scene
 
@@ -36,34 +37,7 @@ class EscapeResponse:
         }
 
 
-def _turn_moves_away(rect, px, py, angle, contact_distance=None):
-    """Check extrema of the continuous point-to-rectangle distance.
-
-    Split at face transitions and at stationary points for the side and corner
-    regions. Distance is monotone between these times.
-    """
-    times = {0., 1.}
-    for edge in (rect.xmin, rect.xmax, 0.):
-        times.update(trig_times(px, py, edge, angle))
-    for edge in (rect.ymin, rect.ymax, 0.):
-        times.update(trig_times(py, -px, edge, angle))
-    for cx, cy in rect.corners:
-        times.update(trig_times(cx * py - cy * px, -cx * px - cy * py, 0., angle))
-    largest_distance = 0.
-    for time in sorted(times):
-        c, s = math.cos(angle * time), math.sin(angle * time)
-        x, y = c * px + s * py, -s * px + c * py
-        distance = math.hypot(max(rect.xmin - x, 0., x - rect.xmax),
-                              max(rect.ymin - y, 0., y - rect.ymax))
-        if distance + EPS < largest_distance:
-            return False
-        if contact_distance is not None and distance <= contact_distance < largest_distance:
-            return False
-        largest_distance = max(distance, largest_distance)
-    return True
-
-
-def _forward_exit(scene, points, initial_intrusions):
+def _forward_exit(scene, points, initial_intrusions, *, minimum_translation=0., max_displacement=math.inf):
     """Find a forward endpoint past the last intrusion and before new contact."""
     body, safety, radius = scene.body, scene.safety_body, scene.target_radius
     local = [scene.local_point(*point) for point in points]
@@ -81,19 +55,63 @@ def _forward_exit(scene, points, initial_intrusions):
 
     # Prefer a centimetre past clearance. Use a shorter move if another
     # obstacle or the map boundary limits the available space.
-    distance = exit_distance + .01
+    lower = max(exit_distance, minimum_translation)
+    distance = min(lower + .01, max_displacement)
+    if distance <= lower + EPS:
+        return None
     first_contact = scene._wall_contact(distance, 0.)
     for i, (x, y) in enumerate(local):
         rect = body if i in intrusions else safety
         first_contact = min(first_contact, rect.first_contact(x, y, distance, 0., radius))
     if math.isfinite(first_contact):
-        distance = (exit_distance + first_contact * distance) / 2
-    if distance <= exit_distance + EPS:
+        distance = (lower + first_contact * distance) / 2
+    if distance <= lower + EPS:
         return None
     if any(safety.intersects_circle(x - distance, y, radius) for x, y in local):
         return None
     x, y, yaw = scene.pose
     return x + distance * math.cos(yaw), y + distance * math.sin(yaw), yaw
+
+
+def _escape_approaches(scene, points, intrusions, *, deadline=math.inf,
+                       minimum_translation=0., max_displacement=math.inf):
+    """Yield legal departures from the safety overlap, each from the same pose."""
+    def forward(start):
+        return _forward_exit(start, points, intrusions, minimum_translation=minimum_translation,
+                             max_displacement=max_displacement)
+
+    if time.monotonic() >= deadline:
+        return
+    goal = forward(scene)
+    if goal is not None:
+        yield (goal,)
+
+    body, safety, radius = scene.body, scene.safety_body, scene.target_radius
+    local = [scene.local_point(*point) for point in points]
+    x, y, yaw = scene.pose
+    turned = scene.clone()
+    for degrees in range(5, 180, 5):
+        for direction in (1, -1):
+            if time.monotonic() >= deadline:
+                return
+            heading = normalize(yaw + math.radians(degrees * direction))
+            angle = normalize(heading - yaw)
+            if math.isfinite(scene._wall_contact(0., angle)):
+                continue
+            if any(math.isfinite((body if i in intrusions else safety).first_contact(px, py, 0., angle, radius))
+                   for i, (px, py) in enumerate(local)):
+                continue
+            if any(not body.turn_preserves_clearance(*local[i], angle)
+                   or not safety.turn_preserves_clearance(*local[i], angle, radius + EPS)
+                   for i in intrusions):
+                continue
+            turned.pose = (x, y, heading)
+            if all(not safety.intersects_circle(*turned.local_point(*points[i]), radius) for i in intrusions):
+                yield (turned.pose,)
+                continue
+            goal = forward(turned)
+            if goal is not None:
+                yield (turned.pose, goal)
 
 
 def plan_escape(request: PlanningRequest | Mapping) -> EscapeResponse:
@@ -125,31 +143,7 @@ def plan_escape(request: PlanningRequest | Mapping) -> EscapeResponse:
         if body.intersects_circle(*local[i], radius):
             return response("body_contact", reason=f"Target {request.targets[i].id!r} touches the physical body")
 
-    goal = _forward_exit(scene, points, intrusions)
-    if goal is not None:
-        return response("success", (goal,), goal)
-
-    x, y, yaw = scene.pose
-    turned = scene.clone()
-    for degrees in range(5, 180, 5):
-        for direction in (1, -1):
-            heading = normalize(yaw + math.radians(degrees * direction))
-            angle = normalize(heading - yaw)
-            if math.isfinite(scene._wall_contact(0., angle)):
-                continue
-            if any(math.isfinite((body if i in intrusions else safety).first_contact(px, py, 0., angle, radius))
-                   for i, (px, py) in enumerate(local)):
-                continue
-            if any(not _turn_moves_away(body, *local[i], angle)
-                   or not _turn_moves_away(safety, *local[i], angle, radius + EPS)
-                   for i in intrusions):
-                continue
-            turned.pose = (x, y, heading)
-            remaining = {i for i in intrusions
-                         if safety.intersects_circle(*turned.local_point(*points[i]), radius)}
-            if not remaining:
-                return response("success", (turned.pose,), turned.pose)
-            goal = _forward_exit(turned, points, intrusions)
-            if goal is not None:
-                return response("success", (turned.pose, goal), goal)
+    goals = next(_escape_approaches(scene, points, intrusions), ())
+    if goals:
+        return response("success", goals, goals[-1])
     return response("blocked", reason="No separating turn or forward move found")

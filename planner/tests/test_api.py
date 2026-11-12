@@ -10,6 +10,39 @@ from route_plan_planner.motion import replay
 
 
 class PublicApiTest(unittest.TestCase):
+    def test_stops_recovers_from_initial_safety_intrusion_before_pickups(self):
+        request = dict(width=12, height=9, pose=(3., 4.5, 0.), method="stops", use_ompl=False, timeout=1.,
+                       targets=[dict(id="far", x=3.5351, y=5.1225), dict(id=42, x=3.3792, y=4.8929)])
+        result = plan(request)
+        self.assertTrue(result.success, result.reason)
+        count = result.metrics["escape_goal_count"]
+        self.assertGreater(count, 0)
+        self.assertTrue(all(stop.goal_index >= count for stop in result.pickup_stops))
+        self.assertTrue(all(not step.expected_collected_ids for step in result.steps[:count]))
+        self.assertEqual(set(result.expected_collected_ids), {"far", 42})
+        scene, ids, _ = _scene(PlanningRequest.from_dict(result.resolved_request), allow_safety_intrusions=True)
+        self.assertTrue(scene.recovering)
+        key_by_id = {name: key for key, name in ids.items()}
+        stops = [{"goal_index": stop.goal_index, "target_ids": [key_by_id[name] for name in stop.target_ids]}
+                 for stop in result.pickup_stops]
+        for dt in (.013, .7):
+            escaped = replay(scene, result.goals[:count], dt, minimum_motion=True)
+            self.assertIsNone(escaped.failure)
+            self.assertFalse(escaped.recovering)
+            self.assertEqual(escaped.targets, scene.targets)
+            final = replay(scene, result.goals, dt, pickup_stops=stops, minimum_motion=True)
+            self.assertIsNone(final.failure)
+            self.assertFalse(final.targets)
+
+    def test_stops_fails_without_actions_if_initial_safety_intrusion_cannot_escape(self):
+        request = dict(width=12, height=9, pose=(3., 4.5, 0.), method="stops",
+                       targets=[dict(id=42, x=3.44, y=4.5)])
+        result = plan(request)
+        self.assertEqual(result.status, "not_found")
+        self.assertIn("No safe escape", result.reason)
+        self.assertFalse(result.goals)
+        self.assertEqual(result.remaining_ids, [42])
+
     def request(self, **changes):
         values = dict(width=12, height=9, pose=(3, 4.5, 0),
                       targets=[Target("item-a", 5, 4.5), Target(205, 6.5, 5)],

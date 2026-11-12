@@ -1,14 +1,12 @@
 {
   "request_id": "local-pickup-demo",
-  "frame_id": "map",
-  "width": 12.0,
-  "height": 9.0,
-  "pose": [3.0, 4.5, 0.0],
+  "frame_id": "pickup_origin",
+  "pose": [0.0, 0.0, 0.0],
   "target_diameter": 0.10,
   "timeout": 0.5,
   "method": "stops",
   "targets": [
-    {"id": "item-a", "x": 3.75, "y": 4.5},
-    {"id": "nearby-item", "x": 3.54, "y": 4.27}
+    {"id": "item-a", "x": 0.75, "y": 0.0},
+    {"id": "nearby-item", "x": 0.54, "y": -0.23}
   ]
 }

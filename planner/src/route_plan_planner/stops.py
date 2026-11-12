@@ -239,6 +239,8 @@ class StopsPlanner:
         started = time.monotonic()
         shared_elapsed = initial.elapsed if initial is not None else 0.
         deadline = started + max(0., self.options.timeout - shared_elapsed)
+        if scene.recovering:
+            return self._plan_after_escape(scene, initial, started, shared_elapsed, deadline)
         root = at_stop_scene(scene)
         if initial is None:
             contact = center_contact_scene(scene)
@@ -380,3 +382,55 @@ class StopsPlanner:
         stats["stop_count"] = len(best.pickup_stops)
         stats["saved_stops"] = baseline_count - len(best.pickup_stops) if baseline_count is not None else None
         return best
+
+    def _plan_after_escape(self, scene, initial, started, shared_elapsed, deadline):
+        from .escape import _escape_approaches
+
+        points = list(scene.targets.values())
+        intrusions = {i for i, point in enumerate(points)
+                      if scene.safety_body.intersects_circle(*scene.local_point(*point), scene.target_radius)}
+        trials = initial.trials if initial is not None else 0
+        expanded = initial.expanded if initial is not None else 0
+        found_escape = False
+        for prefix in _escape_approaches(scene, points, intrusions, deadline=deadline,
+                                        minimum_translation=MIN_TRANSLATION):
+            try:
+                escaped = replay(scene, prefix, dt=.013, minimum_motion=True)
+            except ValueError:
+                continue
+            if escaped.failure or escaped.recovering:
+                continue
+            found_escape = True
+            time_left = deadline - time.monotonic()
+            if time_left <= 0 or trials >= self.options.max_trials or expanded >= self.options.max_expansions:
+                break
+            options = replace(self.options, timeout=time_left, max_trials=self.options.max_trials - trials,
+                              max_expansions=self.options.max_expansions - expanded)
+            result = StopsPlanner(options).plan(escaped)
+            trials += result.trials
+            expanded += result.expanded
+            if result.status != "success":
+                continue
+            goals = [*prefix, *result.goals]
+            stops = [{**stop, "goal_index": stop["goal_index"] + len(prefix)} for stop in result.pickup_stops]
+            try:
+                checked = replay(scene, goals, dt=.013, pickup_stops=stops, minimum_motion=True)
+            except ValueError:
+                continue
+            if checked.failure or checked.targets:
+                continue
+            result.goals, result.pickup_stops = goals, stops
+            result.final = checked.snapshot()
+            result.length = path_length(scene.pose, goals)
+            result.elapsed = shared_elapsed + time.monotonic() - started
+            result.trials, result.expanded = trials, expanded
+            result.optimization["escape_goal_count"] = len(prefix)
+            return result
+
+        exhausted = (time.monotonic() >= deadline or trials >= self.options.max_trials
+                     or expanded >= self.options.max_expansions)
+        reason = ("No complete pickup plan found after escaping" if found_escape
+                  else "No safe escape from the initial safety intrusion")
+        return PlanResult("budget_exhausted" if exhausted else "not_found", reason=reason,
+                          remaining=len(points), best_remaining=len(points), trials=trials, expanded=expanded,
+                          elapsed=shared_elapsed + time.monotonic() - started)

@@ -1,6 +1,6 @@
 # 静态目标消除 baseline
 
-到原停靠点后，可以独立仿真最新观测下的局部拾取修正。输入 JSON 的 `pose` 是实测停车位姿，`targets` 包含更新后的拾取目标和附近未拾取物体。
+到原停靠点后，可以独立仿真最新观测下的局部拾取修正。输入 JSON 的 `pose` 是实测停车位姿，`targets` 包含更新后的拾取目标和附近未拾取物体。无图示例省略宽高，使用停车时刻的固定车身坐标系。
 
 ```bash
 uv run --project planner route-plan adjust --input planner/examples/pickup_adjustment.json \
