@@ -138,7 +138,8 @@ class Scene:
 
     def __init__(self, config: str | Path | None = None, scenario: str = "front",
                  seed: int | None = None, body_margin: float | None = None,
-                 robot_config: str | Path | None = None, target_diameter: float | None = None):
+                 robot_config: str | Path | None = None, target_diameter: float | None = None,
+                 *, obstacles=None):
         self.config_path = (Path(config) if config else Path(str(DEFAULT_CONFIG))).resolve()
         self.config, self.robot_config_path = load_config(self.config_path, robot_config)
         world, robot, custom = (self.config[k] for k in ("world", "robot", "custom"))
@@ -167,6 +168,13 @@ class Scene:
         depth, cw = finite(custom["collector"]["depth"]), finite(custom["collector"]["width"])
         if min(self.width, self.height, length, width, depth, cw) <= 0:
             raise ValueError("Map, body and collector dimensions must be positive")
+        obstacle_values = custom.get("obstacles", ()) if obstacles is None else obstacles
+        self.obstacles = tuple(tuple(map(finite, disk)) for disk in obstacle_values)
+        for x, y, radius in self.obstacles:
+            if not 0 < radius < min(x, y, self.width - x, self.height - y):
+                raise ValueError("Obstacle disks must have positive radius and fit inside the map")
+        if self.obstacles or "obstacles" in custom:
+            custom["obstacles"] = [list(disk) for disk in self.obstacles]
         if robot["shape"]["name"] != "rectangle":
             raise ValueError("This scene requires a rectangular robot")
         if world.get("offset", [0, 0]) != [0, 0]:
@@ -336,6 +344,8 @@ class Scene:
             candidate.pose = pose
             if candidate._wall_contact(0, 0) < math.inf:
                 raise ValueError("Resized footprint must fit inside the map")
+            if math.isfinite(candidate._obstacle_contact(0, 0)[0]):
+                raise ValueError("Resized footprint touches an obstacle")
         if any(candidate.safety_body.intersects_circle(*self.local_point(x, y), self.target_radius)
                for x, y in self.targets.values()):
             raise ValueError("Resized body overlaps an uncollected target")
@@ -368,6 +378,8 @@ class Scene:
         self.collection_events = []
         if self._wall_contact(0, 0) < math.inf:
             raise ValueError("Initial robot and collector must fit strictly inside the map")
+        if math.isfinite(self._obstacle_contact(0, 0)[0]):
+            raise ValueError("Initial footprint touches an obstacle")
         x, y, theta = self.initial_pose
         c, s = math.cos(theta), math.sin(theta)
         if self.scenario == "front":
@@ -380,6 +392,8 @@ class Scene:
                          for a in (i * math.tau / 16 for i in range(16))]
         elif self.scenario == "random":
             positions = None
+        elif self.scenario == "empty":
+            positions = ()
         else:
             raise ValueError(f"Unknown scenario: {self.scenario}")
         if positions is not None:
@@ -398,7 +412,8 @@ class Scene:
                 lx, ly = self.local_point(tx, ty)
                 if (not self.safety_body.intersects_circle(lx, ly, self.target_radius)
                         and not self.collector.intersects_circle(lx, ly, self.target_radius)
-                        and not self._overlaps_target(tx, ty)):
+                        and not self._overlaps_target(tx, ty)
+                        and not self._overlaps_obstacle(tx, ty)):
                     self.add_target(tx, ty)
             if len(self.targets) != count:
                 raise ValueError("Not enough space to place random targets")
@@ -424,6 +439,8 @@ class Scene:
             if not (radius + EPS < x < self.width - radius - EPS
                     and radius + EPS < y < self.height - radius - EPS):
                 raise ValueError("Target must be inside the map")
+            if self._overlaps_obstacle(x, y):
+                raise ValueError("Target touches an obstacle")
             local = self.local_point(x, y)
             if self.safety_body.intersects_circle(*local, radius):
                 if not allow_safety_intrusions or self.body.intersects_circle(*local, radius):
@@ -439,6 +456,10 @@ class Scene:
 
     def _overlaps_target(self, x: float, y: float) -> bool:
         return any(math.dist((x, y), p) < self.target_diameter - EPS for p in self.targets.values())
+
+    def _overlaps_obstacle(self, x: float, y: float) -> bool:
+        return any(math.hypot(x - ox, y - oy) <= radius + self.target_radius + EPS
+                   for ox, oy, radius in self.obstacles)
 
     def remove_nearest(self, x: float, y: float, radius: float = .25) -> None:
         if self.targets:
@@ -476,6 +497,15 @@ class Scene:
             return 0.
         return self.body.first_contact(x, y, distance, rotation, self.target_radius)
 
+    def _obstacle_contact(self, distance, rotation):
+        first = (math.inf, 0)
+        footprints = (self.safety_body, self.collector)
+        for index, (x, y, radius) in enumerate(self.obstacles, 1):
+            local = self.local_point(x, y)
+            for rect in footprints:
+                first = min(first, (rect.first_contact(*local, distance, rotation, radius), index))
+        return first
+
     def advance(self, *, distance: float = 0, rotation: float = 0) -> None:
         distance, rotation = finite(distance), finite(rotation)
         if distance < 0:
@@ -488,6 +518,11 @@ class Scene:
         stop = self._wall_contact(distance, rotation)
         failure = "Map boundary" if math.isfinite(stop) else None
         collision_point = None
+        obstacle_time, obstacle = self._obstacle_contact(distance, rotation)
+        if obstacle_time < stop:
+            stop = obstacle_time
+            failure = f"Hit obstacle #{obstacle}"
+            collision_point = self.obstacles[obstacle - 1][:2]
         collections = []
         groups = tuple((key,) for key in self.targets) if self.pickup_rule == "center" else self.target_groups
         for group in groups:
@@ -534,7 +569,10 @@ class Scene:
         self.advance(distance=metres)
 
     def snapshot(self) -> dict:
-        return {"pose": list(self.pose), "remaining": dict(self.targets),
+        result = {"pose": list(self.pose), "remaining": dict(self.targets),
                 "collected": dict(self.collected), "failure": self.failure,
                 "scenario": self.scenario, "seed": self.seed,
                 "dimensions": self.dimensions, "target_diameter": self.target_diameter}
+        if self.obstacles:
+            result["obstacles"] = [list(disk) for disk in self.obstacles]
+        return result

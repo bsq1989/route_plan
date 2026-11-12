@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 route-sim = "route_plan_sim.app:main"
+route-sim-perception = "route_plan_sim.perception_demo:main"
 
 [build-system]
 requires = ["hatchling"]

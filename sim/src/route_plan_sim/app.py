@@ -42,6 +42,14 @@ def configure_chinese_font():
     plt.rcParams["axes.unicode_minus"] = False
 
 
+def make_environment(scene: Scene, display: bool):
+    """Give IR-SIM the resolved map and the same vehicle geometry as Scene."""
+    with TemporaryDirectory(prefix="route-plan-scene-") as directory:
+        resolved = Path(directory) / "world.yaml"
+        resolved.write_text(yaml.safe_dump(scene.config, allow_unicode=True), encoding="utf-8")
+        return irsim.make(str(resolved), display=display, step_mode="external", log_level="ERROR")
+
+
 def error_text(error: ValueError) -> str:
     # Keep episode API errors stable while showing Chinese in the viewer.
     return {
@@ -73,13 +81,7 @@ class Viewer:
         configure_chinese_font()
         self.scene = scene
         self.motion = PoseController(scene)
-        # IR-SIM accepts a file path. Feed it the resolved map + vehicle config
-        # so its first frame and internal geometry use the same physical sizes.
-        with TemporaryDirectory(prefix="route-plan-scene-") as directory:
-            resolved = Path(directory) / "world.yaml"
-            resolved.write_text(yaml.safe_dump(scene.config, allow_unicode=True), encoding="utf-8")
-            self.env = irsim.make(str(resolved), display=display,
-                                  step_mode="external", log_level="ERROR")
+        self.env = make_environment(scene, display)
         # IR-SIM 2.12.0 exposes its Matplotlib canvas through EnvPlot. Keep this
         # version-specific access here; the episode API never depends on it.
         self.fig, self.ax = self.env._env_plot.fig, self.env._env_plot.ax
