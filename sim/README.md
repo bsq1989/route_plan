@@ -107,26 +107,6 @@ uv run --project sim route-sim --distance 1.5 --snapshot sim/output/collected.pn
 
 `--heading`、`--distance` 可在打开窗口或导出截图之前依次执行一次转向和前进。导出 PNG 时同时生成同名 JSON，不会弹窗。
 
-## 双相机主动感知示例
-
-从仓库根目录运行，`--with-editable` 加载同仓库的主动感知 SDK。
-
-```bash
-uv run --project sim --with-editable ./active_perception route-sim-perception --seed 42
-```
-
-默认在 `sim/output/active-perception/` 为每个场景导出一份 IR-SIM GIF 回放和同名 JSON。
-
-| 场景 | 回放中的过程 |
-| --- | --- |
-| `range-bias` | 广角方位引导转向，粗略 XY 沿视线偏远。转向后局部相机仍超距，走近后确认一个目标。 |
-| `occlusion` | 起点两台相机都漏检。车按位姿指令绕开遮挡物，到第二个观察位置后确认一个目标。 |
-| `shared-bearing` | 广角将两个相近方位合成一条线索，执行建议转向后局部相机确认两个坐标。 |
-
-`--case occlusion` 可单跑指定场景，`--output` 可指定输出目录。`--config` 可替换 `src/route_plan_sim/perception.yaml`，分别设置两台相机的平面安装位姿、水平视场、距离上限、广角距离误差与合并角，以及各场景的真值目标、圆形遮挡物和预设观察位姿。默认安装位姿为仿真示例参数。遮挡使用相机到目标圆心的视线检查，未观测的目标依然参与扫掠碰撞检查。
-
-JSON 中的 `observations` 保留各相机帧的模拟时间、光轴坐标系和 map 安装位姿，`view_requests` 保留 `suggest_views()` 的输入、建议和选中项，`actions` 与 `trace` 保留执行结果和实际位姿。最终 `handoff` 包含局部确认得到的 `targets_xy_m`、同一时刻的 `robot_pose_map` 和 `frame_id="map"`，可供上层构造拾取 SDK 请求。示例在交接完成后结束。记录中的长度单位为米，角度为弧度。
-
 ## 给后续算法的接口
 
 几何规则在 `scene.py`，导入时不创建窗口，也不加载 IR-SIM：

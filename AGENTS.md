@@ -2,7 +2,7 @@
 
 ## 项目目标与目录
 
-本项目研究前置消除器小车的目标消除顺序与路径规划。已有基于 IR-SIM 的二维几何仿真沙盒、双相机主动感知示例，以及 `planner/` 静态完整准确观测的自动清除 baseline。主动感知示例验收到局部相机确认并交接坐标，规划器当前仍使用静态输入，ROS / Nav2 尚未接入。
+本项目研究前置消除器小车的目标消除顺序与路径规划。已有基于 IR-SIM 的二维几何仿真沙盒和 `planner/` 静态完整准确观测的自动清除 baseline。规划器每次调用处理一份静态目标快照。
 
 - `sim/`：独立仿真工程，拥有自己的 `pyproject.toml` 和 `uv.lock`。仿真代码、配置、依赖和测试均放在此目录。
 - `sim/config/robot.yaml`：默认车辆配置，每次新建 `Scene` 自动读取。
@@ -14,7 +14,6 @@
 - `sim/src/route_plan_sim/app.py`：IR-SIM 显示适配、中文界面与手动控制。
 - `sim/tests/`：配置、规则、控制器和离屏界面测试。
 - `sim/output/`：导出的 PNG、GIF、JSON 和临时构建产物，已被 Git 忽略。
-- `active_perception/`：独立的主动感知 SDK，Python 包名为 `active_perception_sdk`。双相机示例从这里调用 `suggest_views()`。
 - `planner/`：独立的任务搜索、运动连接器、OMPL 绕行、自动演示及回归测试，包含自己的 `pyproject.toml` 和 `uv.lock`。
 - `planner/src/route_plan_planner/api.py`：业务请求与响应封装；`planner/sdk/`：纯算法 SDK 构建配置、依赖说明与 examples；`planner/tools/package_sdk.py`：固定打包入口。
 - `planner/src/route_plan_planner/stops.py`：`method="stops"` 停靠优化；`pickup_stops` 给出从 0 开始的目标位姿索引和批次 ID。此模式使用 `collection_mode="at_stop"`，到位后显式 `collect_at_stop()`，途中不删除目标。每段实际平移必须大于 5 cm，每次实际转向必须大于 1°。在运动、碰撞与全部清除约束下仅优化拾取服务位姿数量。旧模式继续按运动接触消除。回放时必须传入 `pickup_stops`，不能用路径经过的多个点冒充一次停靠。
@@ -57,25 +56,6 @@ uv run --project planner route-plan compare --seeds 0:100 --timeout 3 --output s
 也可使用仓库 `environment.yml` 创建独立 Conda `route-plan` 环境，再从根目录执行 `python -m pip install -e ./sim -e ./planner`。具体命令见 `planner/README.md`。
 
 交互模式需要桌面图形环境和中文字体；离屏导出不打开窗口。`--heading`（度）和 `--distance`（米）可在打开窗口或截图前依次执行一次转向和前进。
-
-## 双相机主动感知仿真
-
-在仓库根目录运行。`--with-editable ./active_perception` 为本次运行加载独立的主动感知 SDK。
-
-```bash
-# 固定种子跑完三组场景并导出回放
-uv run --project sim --with-editable ./active_perception route-sim-perception --seed 42
-
-# 主动感知专项测试
-uv run --project sim --with-editable ./active_perception python -m unittest discover -s sim/tests -p test_perception.py -v
-```
-
-- 默认产物位于 `sim/output/active-perception/`，每组都有同名 `.gif`（IR-SIM 回放）和 `.json`。`--case` 可单跑 `range-bias`（远距偏差）、`occlusion`（遮挡）、`shared-bearing`（多目标合并线索）。`--config` 可换配置，`--output` 可换输出目录。
-- [perception.yaml](sim/src/route_plan_sim/perception.yaml) 配置双相机安装位姿、视场、距离、广角误差与合并角，以及真值目标、圆形遮挡物和预设观察位姿。[cameras.py](sim/src/route_plan_sim/cameras.py) 负责光轴坐标转换和观测模拟，[perception_replay.py](sim/src/route_plan_sim/perception_replay.py) 负责导出回放。
-- [perception_demo.py](sim/src/route_plan_sim/perception_demo.py) 的 `run_case()` 是上层编排入口。它把广角方位转换成局部相机光轴相对角，再调用 `active_perception_sdk.suggest_views()`，通过 `PoseController` 执行所选转向并采新帧。需要平移时执行预设观察位姿。`Scene` 保留所有真值目标和遮挡物，漏检目标继续参与连续碰撞检查，观察阶段沿途不消除目标。
-- JSON 中 `observations` 保存时间戳、相机坐标系、相机位姿与检测，`view_requests` 保存 SDK 建议和选中项，`actions` 与 `trace` 保存实际执行。`handoff.targets_xy_m` 是局部相机确认后转换到 `map` 的坐标，`handoff.robot_pose_map` 是同一时刻的位姿，长度为米、yaw 为弧度。后续接拾取层可用这些字段构造 `PlanningRequest` 的 `targets` 和 `pose`，目标 ID 由上层分配。示例执行到交接即结束。
-
-完整参数和三组验收现象见 [sim/README.md](sim/README.md#双相机主动感知示例)。
 
 ## 默认车辆与配置约定
 

@@ -80,6 +80,15 @@ class PoseControllerTest(unittest.TestCase):
         self.assertAlmostEqual(self.scene.pose[0], 3.5 - math.sqrt(.05**2 - .01**2))
         self.assertAlmostEqual(self.scene.pose[2], 0)
 
+    def test_fixed_obstacle_stops_forward_motion_at_first_contact(self):
+        scene = Scene(scenario="empty", obstacles=[(4.3, 4.5, .3)])
+        motion = PoseController(scene)
+        motion.set_goal(5, 4.5, 0)
+        motion.step(10)
+        self.assertEqual(scene.failure, "Hit obstacle #1")
+        self.assertAlmostEqual(scene.pose[0], 4.3 - .3 - scene.collector.xmax)
+        self.assertEqual(scene.clone().obstacles, scene.obstacles)
+
     def test_goal_replacement_starts_from_current_pose(self):
         self.controller.set_goal(5, 4.5, 0)
         self.controller.step(.5)
