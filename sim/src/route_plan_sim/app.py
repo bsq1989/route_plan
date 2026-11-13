@@ -44,9 +44,13 @@ def configure_chinese_font():
 
 def make_environment(scene: Scene, display: bool):
     """Give IR-SIM the resolved map and the same vehicle geometry as Scene."""
+    xmin, ymin, _, _ = scene.map_bounds
+    config = {**scene.config, "world": {
+        **scene.config["world"], "width": scene.width, "height": scene.height, "offset": [xmin, ymin],
+    }}
     with TemporaryDirectory(prefix="route-plan-scene-") as directory:
         resolved = Path(directory) / "world.yaml"
-        resolved.write_text(yaml.safe_dump(scene.config, allow_unicode=True), encoding="utf-8")
+        resolved.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
         return irsim.make(str(resolved), display=display, step_mode="external", log_level="ERROR")
 
 

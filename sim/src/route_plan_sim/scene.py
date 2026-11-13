@@ -139,12 +139,14 @@ class Scene:
             raise ValueError("Unsupported pickup_rule")
         custom["pickup_rule"] = self.pickup_rule
         self.width, self.height = finite(world["width"]), finite(world["height"])
-        self.fence = Fence.from_points(custom["fence"]) if custom.get("fence") is not None else None
+        self.fence_enabled = custom.get("fence_enabled", True)
+        if not isinstance(self.fence_enabled, bool):
+            raise ValueError("fence_enabled must be boolean")
+        points = custom.get("fence")
+        self.fence = Fence.from_points(points) if self.fence_enabled and points is not None else None
         if self.fence is not None:
             xmin, ymin, xmax, ymax = self.fence.bounds
             self.width, self.height = xmax - xmin, ymax - ymin
-            world.update(width=self.width, height=self.height, offset=[xmin, ymin])
-            custom["fence"] = [list(point) for point in self.fence.vertices]
             self.map_bounds = self.fence.bounds
         else:
             xmin, ymin = map(finite, world.get("offset", [0, 0]))
@@ -581,6 +583,9 @@ class Scene:
                 "dimensions": self.dimensions, "target_diameter": self.target_diameter}
         if self.obstacles:
             result["obstacles"] = [list(disk) for disk in self.obstacles]
-        if self.fence is not None:
-            result["fence"] = [list(point) for point in self.fence.vertices]
+        custom = self.config["custom"]
+        if custom.get("fence") is not None:
+            result["fence"] = deepcopy(custom["fence"])
+        if "fence_enabled" in custom or "fence" in result:
+            result["fence_enabled"] = self.fence_enabled
         return result

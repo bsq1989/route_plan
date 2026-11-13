@@ -1,0 +1,29 @@
+world:
+  width: 3.936
+  height: 4.849
+  offset: [-1.049, -3.139]
+  step_time: 0.04
+  sample_time: 0.04
+  control_mode: auto
+  step_mode: external
+  collision_mode: unobstructed
+  plot:
+    show_title: false
+robot:
+  state: [0.4, -0.8, 0]
+  color: '#2563eb'
+custom:
+  collection_mode: at_stop
+  target_diameter: 0.10
+  seed: 41
+  random_count: 4
+  fence_enabled: true
+  # Gateway SDK v0.2.11 实测回归使用的有效顶点，已内缩 0.16 m。
+  # map 坐标，单位米。矩形尺寸和原点取实测原始边界的外接框。
+  fence:
+    - [0.6622758445653983, -2.9270502705485235]
+    - [-0.8374754801498016, 0.3656023008084382]
+    - [1.6071581157901282, 1.497195036625605]
+    - [2.6751808134696753, -0.8460520977504206]
+    - [2.2211712444246885, -1.0540564818062734]
+    - [2.660034520774423, -2.0167565618171945]

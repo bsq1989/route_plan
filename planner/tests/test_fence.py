@@ -1,7 +1,12 @@
 import json
 import math
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
+import yaml
+
+from route_plan_sim import Scene
 from route_plan_planner.api import PlanningRequest, _scene, plan
 from route_plan_planner.adjustment import plan_pickup_adjustment
 from route_plan_planner.escape import plan_escape
@@ -70,6 +75,46 @@ class FenceTest(unittest.TestCase):
             plan({**request, "targets": [{"id": 1, "x": 5, "y": 1}]})
         with self.assertRaisesRegex(ValueError, "fence_enabled"):
             plan({**request, "fence_enabled": "false"})
+
+    def test_measured_fence_switch_matches_simulator_and_sdk_sweeps(self):
+        config_path = Path(__file__).resolve().parents[2] / "sim/config/measured-fence.yaml"
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config["robot"]["state"] = [1.2, .7, 0]
+        vertices = config["custom"]["fence"]
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "world.yaml"
+            for enabled in (True, False):
+                with self.subTest(fence_enabled=enabled):
+                    config["custom"]["fence_enabled"] = enabled
+                    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+                    static = Scene(path, scenario="empty")
+                    request = PlanningRequest.from_scene(static, method="stops")
+                    self.assertEqual(request.to_dict()["fence"], vertices)
+                    self.assertEqual((request.width, request.height), (3.936, 4.849))
+                    sdk = self.scene(**request.to_dict())
+                    restored = restore_scene(describe_scene(static))
+                    for scene in (static, sdk, restored):
+                        self.assertEqual(scene.config["custom"]["fence"], vertices)
+                        self.assertEqual(scene.map_bounds, static.map_bounds)
+                        self.assertEqual(scene.fence is not None, enabled)
+                        drive, turn = scene.clone(), scene.clone()
+                        drive.forward(.5)
+                        turn.advance(rotation=math.pi / 2)
+                        if enabled:
+                            self.assertEqual(drive.failure, "Map boundary")
+                            self.assertAlmostEqual(drive.pose[0], 1.3032098193904913)
+                            self.assertEqual(turn.failure, "Map boundary")
+                            self.assertAlmostEqual(turn.pose[2], 1.3482759132484485)
+                        else:
+                            for edge, expected in zip(scene.map_bounds, (-1.049, -3.139, 2.887, 1.71)):
+                                self.assertAlmostEqual(edge, expected)
+                            self.assertIsNone(drive.failure)
+                            self.assertAlmostEqual(drive.pose[0], 1.7)
+                            self.assertIsNone(turn.failure)
+                            self.assertAlmostEqual(turn.pose[2], math.pi / 2)
+                            drive.forward(2.)
+                            self.assertEqual(drive.failure, "Map boundary")
+                            self.assertAlmostEqual(drive.pose[0], 2.887 - scene.collector.xmax)
 
     def test_disabled_fence_is_shared_by_adjustment_and_escape(self):
         request = self.request(fence_enabled=False, pose=[-2., -2., 0.],

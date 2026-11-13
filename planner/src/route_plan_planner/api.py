@@ -68,16 +68,28 @@ class PlanningRequest:
     schema_version: int = 1
     fence: tuple[tuple[float, float], ...] | None = None
     fence_enabled: bool = True
+    map_offset: tuple[float, float] = (0., 0.)
 
     def __post_init__(self):
         if not isinstance(self.fence_enabled, bool):
             raise ValueError("fence_enabled must be boolean")
+        fence_span = None
         if self.fence_enabled and self.fence is not None:
             fence = Fence.from_points(self.fence)
             xmin, ymin, xmax, ymax = fence.bounds
+            fence_span = xmax - xmin, ymax - ymin
             object.__setattr__(self, "fence", fence.vertices)
-            object.__setattr__(self, "width", xmax - xmin)
-            object.__setattr__(self, "height", ymax - ymin)
+            if self.width is None:
+                object.__setattr__(self, "width", fence_span[0])
+            if self.height is None:
+                object.__setattr__(self, "height", fence_span[1])
+        try:
+            offset = tuple(_number(value, "map_offset") for value in self.map_offset)
+        except TypeError as error:
+            raise ValueError("map_offset must contain x and y in metres") from error
+        if len(offset) != 2:
+            raise ValueError("map_offset must contain x and y in metres")
+        object.__setattr__(self, "map_offset", offset)
         temporary_map = not self.fence_enabled and self.width is None and self.height is None
         dimensions = () if temporary_map else ("width", "height")
         for name in (*dimensions, "timeout", "target_diameter"):
@@ -85,7 +97,7 @@ class PlanningRequest:
             if value < 0 or value == 0 and name != "target_diameter":
                 raise ValueError(f"{name} must be {'nonnegative' if name == 'target_diameter' else 'positive'}")
             object.__setattr__(self, name, value)
-        if not temporary_map and self.target_diameter >= min(self.width, self.height):
+        if not temporary_map and self.target_diameter >= min(fence_span or (self.width, self.height)):
             raise ValueError("Target diameter must be smaller than the map")
         try:
             pose = tuple(_number(value, "pose") for value in self.pose)
@@ -119,6 +131,19 @@ class PlanningRequest:
             raise ValueError("robot_config must be a profile mapping, YAML path, or None")
 
     @classmethod
+    def from_scene(cls, scene: Scene, **options):
+        """Use a static scene's pose, targets, vehicle and map configuration."""
+        record = describe_scene(scene)
+        world, custom = scene.config["world"], scene.config["custom"]
+        return cls.from_dict({
+            "width": world["width"], "height": world["height"], "map_offset": world.get("offset", (0., 0.)),
+            "pose": scene.pose, "targets": [{"id": key, "x": x, "y": y} for key, (x, y) in scene.targets.items()],
+            "target_diameter": scene.target_diameter, "robot_config": record["vehicle_config"],
+            "fence": custom.get("fence"), "fence_enabled": scene.fence_enabled, "seed": scene.seed,
+            **options,
+        })
+
+    @classmethod
     def from_dict(cls, payload: Mapping):
         if not isinstance(payload, Mapping):
             raise ValueError("Request must be a mapping")
@@ -140,6 +165,10 @@ class PlanningRequest:
             result["fence"] = [list(point) for point in self.fence]
         if self.fence_enabled:
             del result["fence_enabled"]
+        if self.map_offset == (0., 0.):
+            del result["map_offset"]
+        else:
+            result["map_offset"] = list(self.map_offset)
         if isinstance(self.robot_config, Path):
             result["robot_config"] = str(self.robot_config)
         return result
@@ -208,13 +237,16 @@ def _robot_profile(profile):
 
 def _empty_scene(request, *, extra_padding=0.):
     profile = _robot_profile(request.robot_config)
-    world = {"world": {"width": request.width, "height": request.height, "step_time": .04},
+    world = {"world": {"width": request.width, "height": request.height, "step_time": .04,
+                       "offset": list(request.map_offset)},
              "robot": {"state": list(request.pose)},
              "custom": {"random_count": 0, "target_diameter": request.target_diameter,
                         "pickup_rule": "center" if request.method == "stops" else "contact",
                         "collection_mode": "at_stop" if request.method == "stops" else "contact"}}
-    if request.fence_enabled and request.fence is not None:
-        world["custom"]["fence"] = [list(point) for point in request.fence]
+    if not request.fence_enabled:
+        world["custom"]["fence_enabled"] = False
+    if request.fence is not None:
+        world["custom"]["fence"] = deepcopy(request.fence)
     if request.width is None:
         # Bound the search around the observations in their original frame.
         # Padding covers the full vehicle and an optional local motion limit.

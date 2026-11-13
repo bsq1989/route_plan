@@ -107,6 +107,19 @@ uv run --project sim route-sim --distance 1.5 --snapshot sim/output/collected.pn
 
 `--heading`、`--distance` 可在打开窗口或导出截图之前依次执行一次转向和前进。导出 PNG 时同时生成同名 JSON，不会弹窗。
 
+## 静态实测围栏
+
+从仓库根目录运行。
+
+```bash
+uv run --project sim route-sim --config sim/config/measured-fence.yaml --scenario random
+uv run --project planner route-plan solve --config sim/config/measured-fence.yaml --scenario random --seed 41 --method stops
+```
+
+设 `custom.fence_enabled: true` 使用 `custom.fence` 的多边形边界。设为 `false` 时，保留原顶点并按 `world.width`、`world.height` 和 `world.offset` 定义的矩形运行。旧配置只要有顶点，省略开关时仍启用围栏。默认 `world.yaml` 使用原来的矩形。
+
+顶点按围栏边界顺序排列，坐标为 map 下的米。实测配置直接使用 Gateway 回归中已内缩 16 cm 的有效顶点。车身安全轮廓和消除器在直行与原地转向时都检查连续触边。用 `PlanningRequest.from_scene(scene, method="stops")` 可把同一份边界和场景快照传给 SDK。
+
 ## 给后续算法的接口
 
 几何规则在 `scene.py`，导入时不创建窗口，也不加载 IR-SIM：

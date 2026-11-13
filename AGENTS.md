@@ -22,6 +22,8 @@
 
 更完整的交互说明见 `sim/README.md`。
 
+实测围栏静态配置在 `sim/config/measured-fence.yaml`，可给 `route-sim` 和 `route-plan solve` 的 `--config` 使用，场景选 `--scenario random`。`custom.fence_enabled` 开启时使用 `custom.fence` 的 map 米制顶点，关闭时使用 `world.width`、`world.height` 和 `world.offset` 定义的矩形并保留顶点。实测顶点已经内缩 16 cm，直接交给仿真与 SDK。`PlanningRequest.from_scene(scene, method="stops")` 将同一份场地、车位、目标和车辆配置转成 SDK 请求。
+
 ## 启动与验证
 
 以下命令均从仓库根目录运行，使用 `uv` 管理 Python 环境和依赖：
