@@ -1,6 +1,6 @@
 # 纯算法 Python SDK 交付与使用
 
-独立分发包为 `route-plan-sdk 0.2.11`，导入名为 `route_plan_sdk`。输入静态场景、车辆位姿和目标，返回有序位姿与拾取安排。
+独立分发包为 `route-plan-sdk 0.2.12`，导入名为 `route_plan_sdk`。输入静态场景、车辆位姿和目标，返回有序位姿与拾取安排。
 
 包内只包含算法和规划必需的私有几何校验内核。不包含 IR-SIM、绘图、动画、交互窗口、演示入口或实车控制功能。该内核与仓库内的几何规则同源，在打包时复制到私有命名空间，避免另行维护一套碰撞实现。
 
@@ -10,9 +10,9 @@
 
 | 文件 | 用法 |
 | --- | --- |
-| `route_plan_sdk-0.2.11-py3-none-any.whl` | 在其他工程的 Python 环境中直接安装 |
-| `route_plan_sdk-0.2.11.tar.gz` | 标准源码分发包，可直接 pip 安装 |
-| `route_plan_sdk-0.2.11-source.zip` | 解压后可查看、修改源码，含完整说明与调用示例 |
+| `route_plan_sdk-0.2.12-py3-none-any.whl` | 在其他工程的 Python 环境中直接安装 |
+| `route_plan_sdk-0.2.12.tar.gz` | 标准源码分发包，可直接 pip 安装 |
+| `route_plan_sdk-0.2.12-source.zip` | 解压后可查看、修改源码，含完整说明与调用示例 |
 | `SHA256SUMS` | 核对所交付文件的 SHA-256 |
 
 无需安装原仓库的 `sim/` 或 `planner/` 包，也无需配置 `PYTHONPATH`。源代码包中包含默认车辆 YAML，默认尺寸直接来自构建时的 `sim/config/robot.yaml`，不在 API 中重复硬编码。
@@ -28,13 +28,13 @@ v0.1.1 热修复通过 69 项仿真测试和 44 项规划器测试。安装后�
 ```bash
 python3.10 -m venv .venv
 source .venv/bin/activate
-python -m pip install /完整路径/route_plan_sdk-0.2.11-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.12-py3-none-any.whl
 
 # 或在源码解压目录执行
 python -m pip install .
 
 # 需要在其他工程中修改本地源码时
-python -m pip install -e /完整路径/route-plan-sdk-0.2.11
+python -m pip install -e /完整路径/route-plan-sdk-0.2.12
 ```
 
 Windows PowerShell 的环境激活命令为 `.venv\Scripts\Activate.ps1`，安装命令相同。具体 OMPL 平台可用性以目标环境实际安装为准。
@@ -71,6 +71,8 @@ else:
 ## 输入输出协议
 
 `PlanningRequest` 接受当前车身中心位姿、目标列表、场地边界、统一目标直径、方法与时限。默认用 `width / height` 定义从 `(0,0)` 起算的矩形。可选的 `fence` 接收 map 下按顺时针或逆时针排列的 `[[x, y], ...]` 顶点，支持凹多边形且自动闭合。传入后可以省略宽高，输出位姿仍在 map 下。车身安全轮廓与消除器不得在任何运动时刻接触围栏，目标圆也必须完整在围栏内。参见 [围栏示例](../planner/sdk/examples/fence.py)。
+
+请求参数 `fence_enabled` 默认是 `true`。设为 `false` 可保留原顶点并关闭围栏。此时可传入矩形宽高，或省略宽高，让 SDK 围绕当前车位和目标生成临时矩形。规划、局部微调和脱困都使用该开关，输入与输出坐标保持在原坐标系。
 
 坐标单位为米，yaw 为弧度。`frame_id` 只作关联标识，不执行坐标转换。物体 ID 支持非空字符串和整数，并保持原类型；重复 ID 会报错。v0.1.1 起允许圆心重合及目标圆重叠，重叠连通组一次清除，消除器接触任意成员即在同一步返回整组原始 ID。仅相切不分组。碰撞按清除前全部成员圆的并集检查，车身先接触或同时接触仍判碰撞。初始接触也按整组处理，输入顺序不影响分组。
 

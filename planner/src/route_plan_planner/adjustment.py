@@ -7,7 +7,8 @@ from typing import Iterable, Mapping
 
 from route_plan_sim.scene import EPS, normalize
 
-from .api import PickupStop, PlanningRequest, PlanningResponse, PlanStep, TargetId, _empty_scene, _number, _robot_profile
+from .api import (PickupStop, PlanningRequest, PlanningResponse, PlanStep, TargetId, _empty_scene, _number,
+                  _robot_profile, _workspace_padding)
 from .escape import _escape_approaches
 from .motion import MIN_TRANSLATION, compact_goals, path_length, replay, steer
 from .records import describe_scene
@@ -29,10 +30,10 @@ def _simulation_requests(request, limit):
         return request, request
     if not isinstance(request, Mapping):
         raise ValueError("Request must be a mapping")
-    if request.get("fence") is not None:
+    width, height = request.get("width"), request.get("height")
+    if request.get("fence") is not None or request.get("fence_enabled", True) is not True:
         request = replace(PlanningRequest.from_dict(request), method="stops")
         return request, request
-    width, height = request.get("width"), request.get("height")
     if (width is None) != (height is None):
         raise ValueError("Provide both width and height, or omit both for local pickup")
     if width is not None:
@@ -45,16 +46,7 @@ def _simulation_requests(request, limit):
     request = replace(PlanningRequest.from_dict({**request, "width": placeholder, "height": placeholder}),
                       method="stops")
     profile = _robot_profile(request.robot_config)
-    try:
-        body, collector = profile["body"], profile["collector"]
-        margin = profile["safety"]["body_margin"]
-        extents = (body["length"], body["width"], margin, collector["width"], collector["depth"],
-                   collector.get("gap", margin), collector.get("lateral_offset", 0.))
-    except (AttributeError, KeyError, TypeError) as error:
-        raise ValueError("Invalid robot_config geometry") from error
-    # The padding conservatively exceeds every rotated footprint, all permitted
-    # centre motion and the radius of the observed disks.
-    padding = 1. + limit + diameter + sum(abs(_number(value, "robot dimension")) for value in extents)
+    padding = _workspace_padding(profile, diameter, limit)
     x, y, yaw = request.pose
     xs = [0., *(target.x - x for target in request.targets)]
     ys = [0., *(target.y - y for target in request.targets)]
@@ -167,7 +159,7 @@ def plan_pickup_adjustment(
     missing = [key for key in requested if key not in observed]
     if missing:
         return finish("target_not_observed", f"Missing updated observations for {missing!r}")
-    scene = _empty_scene(simulation)
+    scene = _empty_scene(simulation, extra_padding=limit)
     response.resolved_request = request.to_dict()
     if simulation is not request:
         del response.resolved_request["width"], response.resolved_request["height"]

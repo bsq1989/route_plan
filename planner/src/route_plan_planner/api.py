@@ -67,20 +67,25 @@ class PlanningRequest:
     request_id: str | None = None
     schema_version: int = 1
     fence: tuple[tuple[float, float], ...] | None = None
+    fence_enabled: bool = True
 
     def __post_init__(self):
-        if self.fence is not None:
+        if not isinstance(self.fence_enabled, bool):
+            raise ValueError("fence_enabled must be boolean")
+        if self.fence_enabled and self.fence is not None:
             fence = Fence.from_points(self.fence)
             xmin, ymin, xmax, ymax = fence.bounds
             object.__setattr__(self, "fence", fence.vertices)
             object.__setattr__(self, "width", xmax - xmin)
             object.__setattr__(self, "height", ymax - ymin)
-        for name in ("width", "height", "timeout", "target_diameter"):
+        temporary_map = not self.fence_enabled and self.width is None and self.height is None
+        dimensions = () if temporary_map else ("width", "height")
+        for name in (*dimensions, "timeout", "target_diameter"):
             value = _number(getattr(self, name), name)
             if value < 0 or value == 0 and name != "target_diameter":
                 raise ValueError(f"{name} must be {'nonnegative' if name == 'target_diameter' else 'positive'}")
             object.__setattr__(self, name, value)
-        if self.target_diameter >= min(self.width, self.height):
+        if not temporary_map and self.target_diameter >= min(self.width, self.height):
             raise ValueError("Target diameter must be smaller than the map")
         try:
             pose = tuple(_number(value, "pose") for value in self.pose)
@@ -129,10 +134,12 @@ class PlanningRequest:
         result = asdict(self)
         result["pose"] = list(self.pose)
         result["targets"] = [asdict(target) for target in self.targets]
-        if self.fence is not None:
-            result["fence"] = [list(point) for point in self.fence]
-        else:
+        if self.fence is None:
             del result["fence"]
+        elif self.fence_enabled:
+            result["fence"] = [list(point) for point in self.fence]
+        if self.fence_enabled:
+            del result["fence_enabled"]
         if isinstance(self.robot_config, Path):
             result["robot_config"] = str(self.robot_config)
         return result
@@ -199,15 +206,24 @@ def _robot_profile(profile):
     return deepcopy(profile)
 
 
-def _empty_scene(request):
+def _empty_scene(request, *, extra_padding=0.):
     profile = _robot_profile(request.robot_config)
     world = {"world": {"width": request.width, "height": request.height, "step_time": .04},
              "robot": {"state": list(request.pose)},
              "custom": {"random_count": 0, "target_diameter": request.target_diameter,
                         "pickup_rule": "center" if request.method == "stops" else "contact",
                         "collection_mode": "at_stop" if request.method == "stops" else "contact"}}
-    if request.fence is not None:
+    if request.fence_enabled and request.fence is not None:
         world["custom"]["fence"] = [list(point) for point in request.fence]
+    if request.width is None:
+        # Bound the search around the observations in their original frame.
+        # Padding covers the full vehicle and an optional local motion limit.
+        padding = _workspace_padding(profile, request.target_diameter, extra_padding)
+        xs = [request.pose[0], *(target.x for target in request.targets)]
+        ys = [request.pose[1], *(target.y for target in request.targets)]
+        world["world"].update(width=max(xs) - min(xs) + 2 * padding,
+                              height=max(ys) - min(ys) + 2 * padding,
+                              offset=[min(xs) - padding, min(ys) - padding])
     with TemporaryDirectory(prefix="route-plan-input-") as directory:
         world_path, robot_path = Path(directory) / "world.yaml", Path(directory) / "robot.yaml"
         world_path.write_text(yaml.safe_dump(world), encoding="utf-8")
@@ -218,8 +234,19 @@ def _empty_scene(request):
         return Scene(config=world_path, robot_config=robot_path, scenario="random", seed=request.seed)
 
 
-def _scene(request, *, allow_safety_intrusions=False):
-    scene = _empty_scene(request)
+def _workspace_padding(profile, diameter, extra):
+    try:
+        body, collector = profile["body"], profile["collector"]
+        margin = profile["safety"]["body_margin"]
+        extents = (body["length"], body["width"], margin, collector["width"], collector["depth"],
+                   collector.get("gap", margin), collector.get("lateral_offset", 0.))
+    except (AttributeError, KeyError, TypeError) as error:
+        raise ValueError("Invalid robot_config geometry") from error
+    return 1. + extra + diameter + sum(abs(_number(value, "robot dimension")) for value in extents)
+
+
+def _scene(request, *, allow_safety_intrusions=False, extra_padding=0.):
+    scene = _empty_scene(request, extra_padding=extra_padding)
     points = ((target.x, target.y) for target in request.targets)
     keys = scene.add_targets(points, allow_safety_intrusions=allow_safety_intrusions)
     id_map = {key: target.id for key, target in zip(keys, request.targets)}

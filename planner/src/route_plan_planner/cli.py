@@ -150,7 +150,8 @@ def _adjust(args):
               "adjustment": {"target_ids": target_ids, "max_displacement": args.max_displacement}}
     if result.success:
         request, simulation = _simulation_requests(result.resolved_request, args.max_displacement)
-        scene, ids, _ = _scene(simulation, allow_safety_intrusions=bool(result.metrics.get("escape_goal_count")))
+        scene, ids, _ = _scene(simulation, allow_safety_intrusions=bool(result.metrics.get("escape_goal_count")),
+                               extra_padding=args.max_displacement)
         keys = {name: key for key, name in ids.items()}
         goals = [_translate_pose(goal, request.pose, simulation.pose) for goal in result.goals]
         stops = [{**stop, "pose": goals[stop["goal_index"]], "target_ids": [keys[name] for name in stop["target_ids"]]}

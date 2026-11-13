@@ -3,6 +3,8 @@ import math
 import unittest
 
 from route_plan_planner.api import PlanningRequest, _scene, plan
+from route_plan_planner.adjustment import plan_pickup_adjustment
+from route_plan_planner.escape import plan_escape
 from route_plan_planner.motion import replay
 from route_plan_planner.records import describe_scene, restore_scene
 
@@ -42,6 +44,41 @@ class FenceTest(unittest.TestCase):
         scene.forward(4)
         self.assertEqual(scene.failure, "Map boundary")
         self.assertAlmostEqual(scene.pose[0], 2.8 - scene.collector.xmax)
+
+    def test_disabled_fence_plans_in_map_coordinates_without_dimensions(self):
+        request = self.request(fence=[[-4, -3], [-1, -3], [-1, -1], [-4, -1]],
+                               pose=[-2., -2., 0.], targets=[{"id": "outside", "x": -.5, "y": -2.}])
+        with self.assertRaisesRegex(ValueError, "Target must be inside"):
+            plan(request)
+        result = plan(PlanningRequest.from_dict({**request, "fence_enabled": False}))
+        self.assertTrue(result.success, result.reason)
+        self.assertEqual(result.expected_collected_ids, ["outside"])
+        self.assertLess(result.final_pose[0], -1.)
+        resolved = json.loads(json.dumps(result.resolved_request))
+        self.assertFalse(resolved["fence_enabled"])
+        self.assertEqual(resolved["fence"], request["fence"])
+        scene, _, _ = _scene(PlanningRequest.from_dict(resolved))
+        restored = restore_scene(describe_scene(scene))
+        self.assertIsNone(restored.fence)
+        self.assertEqual(restored.map_bounds, scene.map_bounds)
+        self.assertEqual(restored.pose, tuple(request["pose"]))
+
+    def test_disabled_fence_preserves_explicit_rectangle(self):
+        request = self.request(fence_enabled=False, width=4, height=4, pose=[1, 1, 0])
+        self.assertEqual(self.scene(**request).map_bounds, (0., 0., 4., 4.))
+        with self.assertRaisesRegex(ValueError, "Target must be inside"):
+            plan({**request, "targets": [{"id": 1, "x": 5, "y": 1}]})
+        with self.assertRaisesRegex(ValueError, "fence_enabled"):
+            plan({**request, "fence_enabled": "false"})
+
+    def test_disabled_fence_is_shared_by_adjustment_and_escape(self):
+        request = self.request(fence_enabled=False, pose=[-2., -2., 0.],
+                               targets=[{"id": "a", "x": -1.22, "y": -2.}])
+        adjusted = plan_pickup_adjustment(request, ["a"])
+        self.assertTrue(adjusted.success, adjusted.reason)
+        self.assertEqual(adjusted.expected_collected_ids, ["a"])
+        self.assertLess(adjusted.final_pose[0], -1.)
+        self.assertEqual(plan_escape(request).status, "already_clear")
 
     def test_concave_notch_can_cross_footprint_with_all_corners_inside(self):
         with self.assertRaisesRegex(ValueError, "fit strictly inside"):

@@ -147,9 +147,8 @@ class Scene:
             custom["fence"] = [list(point) for point in self.fence.vertices]
             self.map_bounds = self.fence.bounds
         else:
-            if world.get("offset", [0, 0]) != [0, 0]:
-                raise ValueError("This scene requires world.offset = [0, 0]")
-            self.map_bounds = (0., 0., self.width, self.height)
+            xmin, ymin = map(finite, world.get("offset", [0, 0]))
+            self.map_bounds = (xmin, ymin, xmin + self.width, ymin + self.height)
         if finite(world["step_time"]) <= 0:
             raise ValueError("step_time must be positive")
         self.target_diameter = finite(custom.get("target_diameter", .1)
@@ -163,9 +162,10 @@ class Scene:
             raise ValueError("Map, body and collector dimensions must be positive")
         obstacle_values = custom.get("obstacles", ()) if obstacles is None else obstacles
         self.obstacles = tuple(tuple(map(finite, disk)) for disk in obstacle_values)
+        xmin, ymin, xmax, ymax = self.map_bounds
         for x, y, radius in self.obstacles:
             inside = (self.fence.contains_disk(x, y, radius) if self.fence is not None
-                      else radius < min(x, y, self.width - x, self.height - y))
+                      else radius < min(x - xmin, y - ymin, xmax - x, ymax - y))
             if radius <= 0 or not inside:
                 raise ValueError("Obstacle disks must have positive radius and fit inside the map")
         if self.obstacles or "obstacles" in custom:
@@ -205,7 +205,9 @@ class Scene:
     def contains_disk(self, x: float, y: float, radius: float = 0.) -> bool:
         if self.fence is not None:
             return self.fence.contains_disk(x, y, radius)
-        return radius + EPS < x < self.width - radius - EPS and radius + EPS < y < self.height - radius - EPS
+        xmin, ymin, xmax, ymax = self.map_bounds
+        inset = radius + EPS
+        return xmin + inset < x < xmax - inset and ymin + inset < y < ymax - inset
 
     def clone(self) -> Scene:
         """Copy an episode for speculative planning, without reloading files.
@@ -471,21 +473,23 @@ class Scene:
             return min(self.fence.first_contact(rect, self.pose, distance, rotation)
                        for rect in (self.safety_body, self.collector))
         x, y, theta = self.pose
+        xmin, ymin, xmax, ymax = self.map_bounds
+        x_edges, y_edges = (xmin, xmax), (ymin, ymax)
         first = math.inf
         for rect in (self.safety_body, self.collector):
             for wx, wy in self.vertices(rect):
-                if wx <= EPS or wx >= self.width - EPS or wy <= EPS or wy >= self.height - EPS:
+                if not (xmin + EPS < wx < xmax - EPS and ymin + EPS < wy < ymax - EPS):
                     return 0.0
                 dx, dy = wx - x, wy - y
                 if distance:
                     vx, vy = distance * math.cos(theta), distance * math.sin(theta)
-                    times = [(edge - wx) / vx for edge in (0, self.width)] if abs(vx) > EPS else []
-                    times += [(edge - wy) / vy for edge in (0, self.height)] if abs(vy) > EPS else []
+                    times = [(edge - wx) / vx for edge in x_edges] if abs(vx) > EPS else []
+                    times += [(edge - wy) / vy for edge in y_edges] if abs(vy) > EPS else []
                 else:
                     times = []
-                    for edge in (0, self.width):
+                    for edge in x_edges:
                         times += trig_times(dx, -dy, edge - x, rotation)
-                    for edge in (0, self.height):
+                    for edge in y_edges:
                         times += trig_times(dy, dx, edge - y, rotation)
                 first = min([first] + [max(0.0, t) for t in times if -EPS <= t <= 1 + EPS])
         return first
