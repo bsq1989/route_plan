@@ -23,20 +23,22 @@ def build(output: Path):
     package = destination / "src" / "route_plan_sdk"
     package.mkdir(parents=True)
     for name in ("api.py", "core.py", "length.py", "stops.py", "motion.py", "ompl_motion.py", "records.py",
-                 "escape.py", "adjustment.py"):
+                 "escape.py", "adjustment.py", "observation.py"):
         source = (root / "planner" / "src" / "route_plan_planner" / name).read_text()
         # Move only imports of the maintained geometry kernel into a private
         # namespace. All algorithm imports remain relative and unchanged.
         source = source.replace("from route_plan_sim", "from route_plan_sdk._geometry")
         (package / name).write_text(source)
     (package / "__init__.py").write_text(
-        '"""Pure algorithm SDK: static scene request -> verified map pose plan."""\n'
+        '"""Pure algorithm SDK for pickup planning and observation steps."""\n'
         'from .api import Target, PlanningRequest, PlanningResponse, PlanStep, PickupStop, plan\n'
         'from .escape import EscapeResponse, plan_escape\n'
         'from .adjustment import plan_pickup_adjustment\n'
+        'from .observation import CoarseTarget, ObservationResponse, plan_observation_step\n'
         f'__version__ = "{version}"\n'
         '__all__ = ["Target", "PlanningRequest", "PlanningResponse", "PlanStep", "PickupStop", "plan",\n'
-        '           "EscapeResponse", "plan_escape", "plan_pickup_adjustment", "__version__"]\n')
+        '           "EscapeResponse", "plan_escape", "plan_pickup_adjustment",\n'
+        '           "CoarseTarget", "ObservationResponse", "plan_observation_step", "__version__"]\n')
     geometry = package / "_geometry"
     geometry.mkdir()
     for name in ("__init__.py", "scene.py", "boundary.py", "config.py", "control.py"):

@@ -1,6 +1,6 @@
 # 纯算法 Python SDK 交付与使用
 
-独立分发包为 `route-plan-sdk 0.2.12`，导入名为 `route_plan_sdk`。输入静态场景、车辆位姿和目标，返回有序位姿与拾取安排。
+独立分发包为 `route-plan-sdk 0.2.13`，导入名为 `route_plan_sdk`。输入静态场景、车辆位姿和目标，返回有序位姿与拾取安排。
 
 包内只包含算法和规划必需的私有几何校验内核。不包含 IR-SIM、绘图、动画、交互窗口、演示入口或实车控制功能。该内核与仓库内的几何规则同源，在打包时复制到私有命名空间，避免另行维护一套碰撞实现。
 
@@ -10,9 +10,9 @@
 
 | 文件 | 用法 |
 | --- | --- |
-| `route_plan_sdk-0.2.12-py3-none-any.whl` | 在其他工程的 Python 环境中直接安装 |
-| `route_plan_sdk-0.2.12.tar.gz` | 标准源码分发包，可直接 pip 安装 |
-| `route_plan_sdk-0.2.12-source.zip` | 解压后可查看、修改源码，含完整说明与调用示例 |
+| `route_plan_sdk-0.2.13-py3-none-any.whl` | 在其他工程的 Python 环境中直接安装 |
+| `route_plan_sdk-0.2.13.tar.gz` | 标准源码分发包，可直接 pip 安装 |
+| `route_plan_sdk-0.2.13-source.zip` | 解压后可查看、修改源码，含完整说明与调用示例 |
 | `SHA256SUMS` | 核对所交付文件的 SHA-256 |
 
 无需安装原仓库的 `sim/` 或 `planner/` 包，也无需配置 `PYTHONPATH`。源代码包中包含默认车辆 YAML，默认尺寸直接来自构建时的 `sim/config/robot.yaml`，不在 API 中重复硬编码。
@@ -28,13 +28,13 @@ v0.1.1 热修复通过 69 项仿真测试和 44 项规划器测试。安装后�
 ```bash
 python3.10 -m venv .venv
 source .venv/bin/activate
-python -m pip install /完整路径/route_plan_sdk-0.2.12-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.13-py3-none-any.whl
 
 # 或在源码解压目录执行
 python -m pip install .
 
 # 需要在其他工程中修改本地源码时
-python -m pip install -e /完整路径/route-plan-sdk-0.2.12
+python -m pip install -e /完整路径/route-plan-sdk-0.2.13
 ```
 
 Windows PowerShell 的环境激活命令为 `.venv\Scripts\Activate.ps1`，安装命令相同。具体 OMPL 平台可用性以目标环境实际安装为准。

@@ -28,7 +28,7 @@ def check_wheel(path, project):
     """Fast checks only: no install, solver invocation, or GUI imports."""
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
-        required = {"route_plan_sdk/__init__.py", "route_plan_sdk/api.py",
+        required = {"route_plan_sdk/__init__.py", "route_plan_sdk/api.py", "route_plan_sdk/observation.py",
                     "route_plan_sdk/_geometry/boundary.py",
                     "route_plan_sdk/_geometry/config/robot.yaml", "route_plan_sdk/_geometry/world.yaml"}
         if not required.issubset(names):
@@ -67,6 +67,7 @@ def verify_install(uv, wheel, source, workspace):
          "--output", workspace / "response.json"], cwd=consumer)
     run([python, "-I", source / "examples/multi_pickup.py"], cwd=consumer)
     run([python, "-I", source / "examples/fence.py"], cwd=consumer)
+    run([python, "-I", source / "examples/observation.py"], cwd=consumer)
     result = json.loads((workspace / "response.json").read_text())
     if not result["success"] or set(result["expected_collected_ids"]) != {"object-101", "object-205"}:
         raise ValueError("Installed example did not collect both expected targets")
