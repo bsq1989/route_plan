@@ -167,3 +167,48 @@ class FenceTest(unittest.TestCase):
                       [(0, 0), (2, 0), (1, 0), (2, 1), (0, 1)]):
             with self.subTest(fence=fence), self.assertRaisesRegex(ValueError, "fence"):
                 PlanningRequest.from_dict(self.request(fence=fence))
+
+    def test_auto_fence_limits_motion_and_can_reach_target_outside_circle(self):
+        request = {"mode": "auto_fence", "pose": [-2., 3., 0.], "method": "stops", "use_ompl": False,
+                   "targets": [{"id": "cup", "x": -.4, "y": 3.}]}
+        result = plan(request)
+        self.assertTrue(result.success, result.reason)
+        self.assertEqual(result.expected_collected_ids, ["cup"])
+        self.assertEqual(result.resolved_request["auto_fence_radius_m"], 1.4)
+        scene, _, _ = _scene(PlanningRequest.from_dict(result.resolved_request))
+        scene = restore_scene(json.loads(json.dumps(describe_scene(scene))))
+        stops = [{"goal_index": stop.goal_index, "target_ids": [1]} for stop in result.pickup_stops]
+        for dt in (.013, .04, .7):
+            final = replay(scene, result.goals, dt, pickup_stops=stops, minimum_motion=True)
+            self.assertIsNone(final.failure)
+            self.assertFalse(final.targets)
+            self.assertLessEqual(max(math.dist(scene.pose[:2], p) for p in final.path), 1.4 + 1e-9)
+        smaller = plan({**request, "auto_fence_radius_m": .45})
+        self.assertFalse(smaller.success)
+        self.assertEqual(smaller.remaining_ids, ["cup"])
+        self.assertFalse(smaller.goals)
+
+    def test_auto_fence_center_stays_fixed_and_map_boundary_still_applies(self):
+        start = [1., 1.5, 0.]
+        fence = [(0., 0.), (2.5, 0.), (2.5, 3.), (0., 3.)]
+        settings = {"pose": start, "fence": fence, "mode": "auto_fence"}
+        scene = self.scene(**settings, auto_fence_radius_m=.6)
+        scene.forward(.6)
+        self.assertIsNone(scene.failure)
+        scene.advance(rotation=math.pi / 2)
+        self.assertIsNone(scene.failure)
+        scene.forward(.2)
+        self.assertEqual(scene.failure, "Motion circle boundary")
+        self.assertAlmostEqual(math.dist(start[:2], scene.pose[:2]), .6)
+
+        bounded = self.scene(**settings, auto_fence_radius_m=2.)
+        bounded.forward(1.5)
+        self.assertEqual(bounded.failure, "Map boundary")
+        self.assertAlmostEqual(bounded.pose[0], 2.5 - bounded.collector.xmax)
+
+    def test_auto_fence_options_are_validated(self):
+        for radius in (0, -1., math.inf, math.nan, True):
+            with self.subTest(radius=radius), self.assertRaisesRegex(ValueError, "auto_fence_radius_m"):
+                self.scene(mode="auto_fence", auto_fence_radius_m=radius)
+        with self.assertRaisesRegex(ValueError, "mode must be"):
+            self.scene(mode="circle")

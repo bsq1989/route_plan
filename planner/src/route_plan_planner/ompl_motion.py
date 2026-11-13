@@ -53,6 +53,8 @@ class OmplMotion:
             return trial
 
         def valid(state):
+            if not scene.contains_motion_point(state.getX(), state.getY()):
+                return False
             trial = at(state)
             return not trial.failure and trial.targets == scene.targets
 
@@ -95,6 +97,8 @@ class OmplMotion:
         return Transition(trial, goals, "ompl")
 
     def connect(self, scene: Scene, goal: Pose, deadline: float) -> Transition | None:
+        if not scene.contains_motion_point(*goal[:2]):
+            return None
         # Approach from a staging pose outside the collector's contact region.
         staging = staging_pose(scene, goal, minimum_motion=self.minimum_motion)
         reposition = self.connect_pose(scene, staging, deadline)
@@ -104,6 +108,6 @@ class OmplMotion:
                 return Transition(approach.scene, reposition.goals + approach.goals, "ompl")
         # A fence can exclude the backward staging pose even when the stop is
         # reachable via a different heading and a final in-place turn.
-        if scene.fence is not None and scene.collection_mode == "at_stop":
+        if (scene.fence is not None or scene.motion_circle is not None) and scene.collection_mode == "at_stop":
             return self.connect_pose(scene, goal, deadline)
         return None

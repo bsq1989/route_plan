@@ -194,6 +194,8 @@ class StopsPlanner:
     @staticmethod
     def _candidate(scene, pose):
         x, y, yaw = pose
+        if not scene.contains_motion_point(x, y):
+            return None
         c, s = math.cos(yaw), math.sin(yaw)
         # The connector still checks both swept footprints along each motion.
         scene.pose = pose
@@ -210,8 +212,8 @@ class StopsPlanner:
             return _Candidate(pose, frozenset(covered), frozenset(blocked))
         return None
 
-    def _fence_candidates(self, scene, candidates, deadline):
-        # At a fence corner, pickup can require a narrow range of headings
+    def _boundary_candidates(self, scene, candidates, deadline):
+        # Near a boundary, pickup can require a narrow range of headings
         # and the outer part of the collector's centre coverage.
         covered = set().union(*(candidate.covered - candidate.blocked for candidate in candidates))
         rect = scene.collector
@@ -262,8 +264,8 @@ class StopsPlanner:
             candidate = self._candidate(at_pose, pose)
             if candidate:
                 candidates.append(candidate)
-        if scene.fence is not None:
-            self._fence_candidates(at_pose, candidates, deadline)
+        if scene.fence is not None or scene.motion_circle is not None:
+            self._boundary_candidates(at_pose, candidates, deadline)
         return candidates
 
     def plan(self, scene: Scene, initial: PlanResult | None = None) -> PlanResult:

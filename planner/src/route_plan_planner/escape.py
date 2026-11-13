@@ -59,7 +59,7 @@ def _forward_exit(scene, points, initial_intrusions, *, minimum_translation=0., 
     distance = min(lower + .01, max_displacement)
     if distance <= lower + EPS:
         return None
-    first_contact = scene._wall_contact(distance, 0.)
+    first_contact = min(scene._wall_contact(distance, 0.), scene._motion_circle_exit(distance))
     for i, (x, y) in enumerate(local):
         rect = body if i in intrusions else safety
         first_contact = min(first_contact, rect.first_contact(x, y, distance, 0., radius))

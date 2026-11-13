@@ -89,7 +89,7 @@ def steer(scene: Scene, goal: Pose, *, minimum_motion: bool = False) -> Transiti
     Long rotations are split into <=90-degree pose commands, never reverse.
     """
     gx, gy, yaw = goal
-    if not scene.contains_disk(gx, gy):
+    if not scene.contains_motion_point(gx, gy) or not scene.contains_disk(gx, gy):
         return None
     dx, dy = gx - scene.pose[0], gy - scene.pose[1]
     distance = math.hypot(dx, dy)
@@ -124,6 +124,8 @@ class DirectMotion:
         self.minimum_motion = minimum_motion
 
     def connect(self, scene: Scene, goal: Pose, deadline: float) -> Transition | None:
+        if not scene.contains_motion_point(*goal[:2]):
+            return None
         direct = steer(scene, goal, minimum_motion=self.minimum_motion)
         if direct is not None:
             return direct

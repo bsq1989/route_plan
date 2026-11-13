@@ -138,7 +138,11 @@ class _Search:
 
     def check(self, start, goals):
         body, collector, radius = self.scene.safety_body, self.scene.collector, self.scene.target_radius
+        if not self.scene.contains_motion_point(*start[:2]):
+            return "auto_fence"
         for goal in goals:
+            if not self.scene.contains_motion_point(*goal[:2]):
+                return "auto_fence"
             dx, dy = goal[0] - start[0], goal[1] - start[1]
             if dx * math.cos(start[2]) + dy * math.sin(start[2]) < -EPS:
                 return "behind_robot"

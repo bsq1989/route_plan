@@ -67,6 +67,7 @@ def verify_install(uv, wheel, source, workspace):
          "--output", workspace / "response.json"], cwd=consumer)
     run([python, "-I", source / "examples/multi_pickup.py"], cwd=consumer)
     run([python, "-I", source / "examples/fence.py"], cwd=consumer)
+    run([python, "-I", source / "examples/auto_fence.py"], cwd=consumer)
     run([python, "-I", source / "examples/observation.py"], cwd=consumer)
     result = json.loads((workspace / "response.json").read_text())
     if not result["success"] or set(result["expected_collected_ids"]) != {"object-101", "object-205"}:

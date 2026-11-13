@@ -144,6 +144,13 @@ class Scene:
             raise ValueError("fence_enabled must be boolean")
         points = custom.get("fence")
         self.fence = Fence.from_points(points) if self.fence_enabled and points is not None else None
+        motion_circle = custom.get("motion_circle")
+        self.motion_circle = None
+        if motion_circle is not None:
+            cx, cy, radius = map(finite, motion_circle)
+            if radius <= 0.:
+                raise ValueError("Motion circle radius must be positive")
+            self.motion_circle = (cx, cy, radius)
         if self.fence is not None:
             xmin, ymin, xmax, ymax = self.fence.bounds
             self.width, self.height = xmax - xmin, ymax - ymin
@@ -210,6 +217,13 @@ class Scene:
         xmin, ymin, xmax, ymax = self.map_bounds
         inset = radius + EPS
         return xmin + inset < x < xmax - inset and ymin + inset < y < ymax - inset
+
+    def contains_motion_point(self, x: float, y: float) -> bool:
+        """Check the optional motion boundary for the robot reference point."""
+        if self.motion_circle is None:
+            return True
+        cx, cy, radius = self.motion_circle
+        return math.hypot(x - cx, y - cy) <= radius + EPS
 
     def clone(self) -> Scene:
         """Copy an episode for speculative planning, without reloading files.
@@ -378,6 +392,8 @@ class Scene:
         self.path = [self.pose[:2]]
         self._next_id = 1
         self.collection_events = []
+        if not self.contains_motion_point(*self.pose[:2]):
+            raise ValueError("Initial robot position must be inside the motion circle")
         if self._wall_contact(0, 0) < math.inf:
             raise ValueError("Initial robot and collector must fit strictly inside the map")
         if math.isfinite(self._obstacle_contact(0, 0)[0]):
@@ -496,6 +512,23 @@ class Scene:
                 first = min([first] + [max(0.0, t) for t in times if -EPS <= t <= 1 + EPS])
         return first
 
+    def _motion_circle_exit(self, distance: float) -> float:
+        if self.motion_circle is None:
+            return math.inf
+        x, y, yaw = self.pose
+        if not self.contains_motion_point(x, y):
+            return 0.
+        c, s = math.cos(yaw), math.sin(yaw)
+        if not distance or self.contains_motion_point(x + distance * c, y + distance * s):
+            # A circle is convex and a turn keeps the reference point fixed.
+            return math.inf
+        cx, cy, radius = self.motion_circle
+        dx, dy = x - cx, y - cy
+        along, across = c * dx + s * dy, c * dy - s * dx
+        radial_fraction = across / radius
+        exit_distance = radius * math.sqrt(max(0., 1. - radial_fraction * radial_fraction)) - along
+        return max(0., min(1., exit_distance / distance))
+
     def _initial_intrusion_contact(self, x, y, distance, rotation):
         """Allow an initially overlapping disk only while moving away from it."""
         if distance and x > self.body.xmax:
@@ -525,6 +558,9 @@ class Scene:
             return
         stop = self._wall_contact(distance, rotation)
         failure = "Map boundary" if math.isfinite(stop) else None
+        circle_exit = self._motion_circle_exit(distance)
+        if circle_exit < stop:
+            stop, failure = circle_exit, "Motion circle boundary"
         collision_point = None
         obstacle_time, obstacle = self._obstacle_contact(distance, rotation)
         if obstacle_time < stop:
@@ -588,4 +624,6 @@ class Scene:
             result["fence"] = deepcopy(custom["fence"])
         if "fence_enabled" in custom or "fence" in result:
             result["fence_enabled"] = self.fence_enabled
+        if self.motion_circle is not None:
+            result["motion_circle"] = list(self.motion_circle)
         return result

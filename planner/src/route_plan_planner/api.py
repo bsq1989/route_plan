@@ -23,6 +23,7 @@ from .records import describe_scene
 
 TargetId = str | int
 Pose = tuple[float, float, float]
+DEFAULT_AUTO_FENCE_RADIUS_M = 1.4
 
 
 def _number(value, name):
@@ -69,8 +70,16 @@ class PlanningRequest:
     fence: tuple[tuple[float, float], ...] | None = None
     fence_enabled: bool = True
     map_offset: tuple[float, float] = (0., 0.)
+    mode: str = "standard"
+    auto_fence_radius_m: float = DEFAULT_AUTO_FENCE_RADIUS_M
 
     def __post_init__(self):
+        if self.mode not in ("standard", "auto_fence"):
+            raise ValueError("mode must be standard or auto_fence")
+        radius = _number(self.auto_fence_radius_m, "auto_fence_radius_m")
+        if radius <= 0.:
+            raise ValueError("auto_fence_radius_m must be positive")
+        object.__setattr__(self, "auto_fence_radius_m", radius)
         if not isinstance(self.fence_enabled, bool):
             raise ValueError("fence_enabled must be boolean")
         fence_span = None
@@ -90,7 +99,8 @@ class PlanningRequest:
         if len(offset) != 2:
             raise ValueError("map_offset must contain x and y in metres")
         object.__setattr__(self, "map_offset", offset)
-        temporary_map = not self.fence_enabled and self.width is None and self.height is None
+        temporary_map = (not self.fence_enabled or self.mode == "auto_fence") and (
+            self.width is None and self.height is None)
         dimensions = () if temporary_map else ("width", "height")
         for name in (*dimensions, "timeout", "target_diameter"):
             value = _number(getattr(self, name), name)
@@ -169,6 +179,10 @@ class PlanningRequest:
             del result["map_offset"]
         else:
             result["map_offset"] = list(self.map_offset)
+        if self.mode == "standard":
+            del result["mode"]
+            if self.auto_fence_radius_m == DEFAULT_AUTO_FENCE_RADIUS_M:
+                del result["auto_fence_radius_m"]
         if isinstance(self.robot_config, Path):
             result["robot_config"] = str(self.robot_config)
         return result
@@ -247,10 +261,13 @@ def _empty_scene(request, *, extra_padding=0.):
         world["custom"]["fence_enabled"] = False
     if request.fence is not None:
         world["custom"]["fence"] = deepcopy(request.fence)
+    if request.mode == "auto_fence":
+        world["custom"]["motion_circle"] = [*request.pose[:2], request.auto_fence_radius_m]
     if request.width is None:
         # Bound the search around the observations in their original frame.
         # Padding covers the full vehicle and an optional local motion limit.
-        padding = _workspace_padding(profile, request.target_diameter, extra_padding)
+        radius = request.auto_fence_radius_m if request.mode == "auto_fence" else 0.
+        padding = _workspace_padding(profile, request.target_diameter, max(extra_padding, radius))
         xs = [request.pose[0], *(target.x for target in request.targets)]
         ys = [request.pose[1], *(target.y for target in request.targets)]
         world["world"].update(width=max(xs) - min(xs) + 2 * padding,
