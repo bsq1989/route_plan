@@ -107,6 +107,8 @@ class Viewer:
         self._card([.035, .015, .70, .055], shadow=False, color="#eaf0f8")
         self.ax.set_facecolor("#ffffff")
         self.ax.grid(True, color="#e9eef5", linewidth=.7)
+        if scene.fence is not None:
+            self.ax.add_patch(Polygon(scene.fence.vertices, fill=False, edgecolor="#475569", linewidth=1.5))
         self.ax.tick_params(axis="both", colors="#8b98aa", labelsize=9, length=0, pad=8)
         for spine in self.ax.spines.values():
             spine.set_edgecolor("#e5ebf3")

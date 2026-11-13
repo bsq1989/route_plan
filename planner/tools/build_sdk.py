@@ -39,7 +39,7 @@ def build(output: Path):
         '           "EscapeResponse", "plan_escape", "plan_pickup_adjustment", "__version__"]\n')
     geometry = package / "_geometry"
     geometry.mkdir()
-    for name in ("__init__.py", "scene.py", "config.py", "control.py"):
+    for name in ("__init__.py", "scene.py", "boundary.py", "config.py", "control.py"):
         shutil.copy2(root / "sim" / "src" / "route_plan_sim" / name, geometry / name)
     original_world = yaml.safe_load((root / "sim" / "src" / "route_plan_sim" / "world.yaml").read_text())
     minimal_world = {"world": {key: original_world["world"][key] for key in ("width", "height", "step_time")},

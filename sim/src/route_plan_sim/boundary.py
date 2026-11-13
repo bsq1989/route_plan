@@ -1,0 +1,188 @@
+"""A simple polygon boundary and continuous contact with a moving rectangle."""
+
+from dataclasses import dataclass, field
+import math
+
+EPS = 1e-9
+Point = tuple[float, float]
+
+
+def trig_times(a: float, b: float, value: float, delta: float) -> list[float]:
+    """Solve a*cos(delta*t) + b*sin(delta*t) = value, 0 <= t <= 1."""
+    radius = math.hypot(a, b)
+    if radius < EPS or abs(delta) < EPS or abs(value) > radius + EPS:
+        return []
+    phase = math.atan2(b, a)
+    alpha = math.acos(max(-1.0, min(1.0, value / radius)))
+    low, high = sorted((0.0, delta))
+    result = []
+    for root in (phase - alpha, phase + alpha):
+        for k in range(math.ceil((low - root - EPS) / math.tau),
+                       math.floor((high - root + EPS) / math.tau) + 1):
+            t = (root + k * math.tau) / delta
+            if -EPS <= t <= 1 + EPS:
+                result.append(max(0.0, min(1.0, t)))
+    return result
+
+
+@dataclass(frozen=True)
+class Edge:
+    start: Point
+    end: Point
+    length: float
+    direction: Point
+
+    @classmethod
+    def between(cls, start, end):
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = math.hypot(dx, dy)
+        if not math.isfinite(length) or length <= EPS:
+            raise ValueError("fence edges must have finite, distinct endpoints")
+        return cls(start, end, length, (dx / length, dy / length))
+
+    def project(self, x, y):
+        dx, dy = x - self.start[0], y - self.start[1]
+        ux, uy = self.direction
+        return ux * dx + uy * dy, ux * dy - uy * dx
+
+    def distance(self, point):
+        along, across = self.project(*point)
+        return math.hypot(max(0., -along, along - self.length), across)
+
+    def intersects(self, other):
+        if any(self.distance(p) <= EPS for p in (other.start, other.end)):
+            return True
+        if any(other.distance(p) <= EPS for p in (self.start, self.end)):
+            return True
+        a, b = (self.project(*p)[1] for p in (other.start, other.end))
+        c, d = (other.project(*p)[1] for p in (self.start, self.end))
+        return a * b < 0 and c * d < 0
+
+
+def _hits_rect(a, b, rect):
+    """Clip a closed segment to the rectangle in its own coordinate frame."""
+    first, last = 0., 1.
+    for start, end, low, high in zip(a, b, (rect.xmin, rect.ymin), (rect.xmax, rect.ymax)):
+        low, high = low - EPS, high + EPS
+        change = end - start
+        if change == 0:
+            if not low <= start <= high:
+                return False
+            continue
+        enter, leave = sorted(((low - start) / change, (high - start) / change))
+        first, last = max(first, enter), min(last, leave)
+        if first > last:
+            return False
+    return True
+
+
+@dataclass(frozen=True)
+class Fence:
+    vertices: tuple[Point, ...]
+    edges: tuple[Edge, ...] = field(init=False)
+    bounds: tuple[float, float, float, float] = field(init=False)
+
+    @classmethod
+    def from_points(cls, points):
+        if not isinstance(points, (list, tuple)):
+            raise ValueError("fence must be a sequence of finite [x, y] pairs")
+        try:
+            vertices = []
+            for point in points:
+                if not isinstance(point, (list, tuple)) or len(point) != 2:
+                    raise ValueError
+                x, y = point
+                if isinstance(x, bool) or isinstance(y, bool):
+                    raise ValueError
+                vertex = float(x), float(y)
+                if not all(map(math.isfinite, vertex)):
+                    raise ValueError
+                vertices.append(vertex)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError("fence must be a sequence of finite [x, y] pairs") from error
+        return cls(tuple(vertices))
+
+    def __post_init__(self):
+        points = self.vertices
+        if len(points) > 1 and points[0] == points[-1]:
+            points = points[:-1]
+        if len(points) < 3 or len(set(points)) != len(points):
+            raise ValueError("fence must contain at least three distinct vertices")
+        edges = tuple(Edge.between(a, b) for a, b in zip(points, (*points[1:], points[0])))
+        for i, edge in enumerate(edges):
+            previous = edges[i - 1]
+            if edge.distance(previous.start) <= EPS or previous.distance(edge.end) <= EPS:
+                raise ValueError("fence edges must not overlap")
+            first = 1 if i == len(edges) - 1 else 0
+            for other in edges[first:i - 1] if i > 1 else ():
+                if edge.intersects(other):
+                    raise ValueError("fence must be a simple polygon without self-intersections")
+        xs, ys = zip(*points)
+        bounds = min(xs), min(ys), max(xs), max(ys)
+        # Use a local origin so a large map translation does not corrupt area.
+        ox, oy = points[0]
+        area = math.fsum((a[0] - ox) * (b[1] - oy) - (a[1] - oy) * (b[0] - ox)
+                         for a, b in zip(points, (*points[1:], points[0])))
+        if not math.isfinite(area) or abs(area) <= EPS**2:
+            raise ValueError("fence must enclose a finite nonzero area")
+        object.__setattr__(self, "vertices", points)
+        object.__setattr__(self, "edges", edges)
+        object.__setattr__(self, "bounds", bounds)
+
+    def contains_disk(self, x, y, radius=0.):
+        inside = False
+        for edge in self.edges:
+            if edge.distance((x, y)) <= radius + EPS:
+                return False
+            ax, ay = edge.start
+            bx, by = edge.end
+            if (ay > y) != (by > y) and x < ax + (bx - ax) * ((y - ay) / (by - ay)):
+                inside = not inside
+        return inside
+
+    def first_contact(self, rect, pose, distance=0., rotation=0.):
+        x, y, yaw = pose
+        c, s = math.cos(yaw), math.sin(yaw)
+        corners = [(c * u - s * v, s * u + c * v) for u, v in rect.corners]
+        u, v = corners[0]
+        if not self.contains_disk(x + u, y + v):
+            return 0.
+
+        # A concave edge can cut the footprint even with all four corners inside.
+        local = []
+        for vx, vy in self.vertices:
+            dx, dy = vx - x, vy - y
+            local.append((c * dx + s * dy, -s * dx + c * dy))
+        if any(_hits_rect(a, b, rect) for a, b in zip(local, (*local[1:], local[0]))):
+            return 0.
+        if not distance and not rotation:
+            return math.inf
+
+        # A first contact has a vertex on an edge (including collinear overlap).
+        # Test stationary fence vertices in the rectangle's moving frame too.
+        first = min(rect.first_contact(u, v, distance, rotation) for u, v in local)
+        for edge in self.edges:
+            ux, uy = edge.direction
+            base_along, base_across = edge.project(x, y)
+            rate = distance * (ux * s - uy * c)
+            if distance and not rate:
+                continue
+            for u, v in corners:
+                across = ux * v - uy * u
+                along = ux * u + uy * v
+                if distance:
+                    times = [-(base_across + across) / rate]
+                else:
+                    times = trig_times(across, along, -base_across, rotation)
+                for t in times:
+                    if not -EPS <= t <= min(1 + EPS, first):
+                        continue
+                    t = max(0., min(1., t))
+                    if distance:
+                        position = base_along + along + distance * t * (ux * c + uy * s)
+                    else:
+                        angle = rotation * t
+                        position = base_along + along * math.cos(angle) - across * math.sin(angle)
+                    if -EPS <= position <= edge.length + EPS:
+                        first = min(first, t)
+        return first

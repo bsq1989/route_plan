@@ -35,10 +35,11 @@ class OmplMotion:
             _rng_initialized = True
         space = ob.SE2StateSpace()
         bounds = ob.RealVectorBounds(2)
-        bounds.setLow(0, .001)
-        bounds.setLow(1, .001)
-        bounds.setHigh(0, scene.width - .001)
-        bounds.setHigh(1, scene.height - .001)
+        xmin, ymin, xmax, ymax = scene.map_bounds
+        bounds.setLow(0, xmin + .001)
+        bounds.setLow(1, ymin + .001)
+        bounds.setHigh(0, xmax - .001)
+        bounds.setHigh(1, ymax - .001)
         space.setBounds(bounds)
 
         def pose(state):
@@ -97,9 +98,12 @@ class OmplMotion:
         # Approach from a staging pose outside the collector's contact region.
         staging = staging_pose(scene, goal, minimum_motion=self.minimum_motion)
         reposition = self.connect_pose(scene, staging, deadline)
-        if reposition is None:
-            return None
-        approach = steer(reposition.scene, goal, minimum_motion=self.minimum_motion)
-        if approach is None:
-            return None
-        return Transition(approach.scene, reposition.goals + approach.goals, "ompl")
+        if reposition is not None:
+            approach = steer(reposition.scene, goal, minimum_motion=self.minimum_motion)
+            if approach is not None:
+                return Transition(approach.scene, reposition.goals + approach.goals, "ompl")
+        # A fence can exclude the backward staging pose even when the stop is
+        # reachable via a different heading and a final in-place turn.
+        if scene.fence is not None and scene.collection_mode == "at_stop":
+            return self.connect_pose(scene, goal, deadline)
+        return None

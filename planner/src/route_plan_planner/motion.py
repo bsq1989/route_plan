@@ -89,7 +89,7 @@ def steer(scene: Scene, goal: Pose, *, minimum_motion: bool = False) -> Transiti
     Long rotations are split into <=90-degree pose commands, never reverse.
     """
     gx, gy, yaw = goal
-    if not (0 < gx < scene.width and 0 < gy < scene.height):
+    if not scene.contains_disk(gx, gy):
         return None
     dx, dy = gx - scene.pose[0], gy - scene.pose[1]
     distance = math.hypot(dx, dy)

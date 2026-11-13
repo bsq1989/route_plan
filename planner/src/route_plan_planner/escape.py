@@ -127,8 +127,7 @@ def plan_escape(request: PlanningRequest | Mapping) -> EscapeResponse:
     body, safety, radius = scene.body, scene.safety_body, scene.target_radius
     points = [(target.x, target.y) for target in request.targets]
     for x, y in points:
-        if not (radius + EPS < x < scene.width - radius - EPS
-                and radius + EPS < y < scene.height - radius - EPS):
+        if not scene.contains_disk(x, y, radius):
             raise ValueError("Target must be inside the map")
     local = [scene.local_point(*point) for point in points]
     intrusions = {i for i, point in enumerate(local) if safety.intersects_circle(*point, radius)}

@@ -1,6 +1,6 @@
 [project]
 name = "route-plan-sdk"
-version = "0.2.9"
+version = "0.2.11"
 description = "Headless task and path planning for circular target collection"
 readme = "README.md"
 requires-python = ">=3.10"

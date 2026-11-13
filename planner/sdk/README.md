@@ -1,6 +1,6 @@
 # Route Plan 纯算法 SDK
 
-`route-plan-sdk 0.2.9`，Python 导入名为 `route_plan_sdk`。输入静态场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。
+`route-plan-sdk 0.2.11`，Python 导入名为 `route_plan_sdk`。输入静态场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。
 
 包内包含任务规划、路径长度优化与必要的私有几何校验内核。没有 IR-SIM、窗口、绘图、动画、场景演示、ROS 或实车控制功能。无需原仓库目录或 `PYTHONPATH`，默认车型文件已随包携带。
 
@@ -29,10 +29,10 @@ source .venv/bin/activate
 python -m pip install .
 
 # 或安装提供的 SDK wheel，二者任选一个
-python -m pip install /完整路径/route_plan_sdk-0.2.9-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.11-py3-none-any.whl
 ```
 
-源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.9`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
+源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.11`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
 
 ## 最小 Python 调用
 
@@ -99,7 +99,8 @@ else:
 
 ## 输入约定
 
-- `width / height`：矩形场地宽高，单位米，内部原点 `(0,0)`。独立固定障碍物、栅格地图和多边形边界尚未支持。
+- `width / height`：省略 `fence` 时必填，表示从 `(0,0)` 起算的矩形场地宽高，单位米。
+- `fence`：可选的场地边界，格式为 `[[x1, y1], [x2, y2], ...]`，顺时针或逆时针排列，自动闭合。支持凹多边形、斜边和负坐标。边界为单个无孔、无自交多边形。传入后以围栏为准，`width / height` 由外接矩形计算，输入和输出坐标保持在同一 map 坐标系。
 - `pose`：当前车辆中心 `(x,y,yaw)`。所有目标与位姿使用同一坐标系；yaw 为弧度，逆时针为正，0 朝右。
 - `targets`：`Target(id,x,y)` 列表，坐标为圆心。ID 可为非空字符串或整数，输出保留原 ID 类型；重复 ID 会报错。允许圆心重合及圆形目标重叠，所有原始 ID 都保留。
 - `target_diameter`：全部物体统一直径，默认 0.10 米；显式传 0 可表示历史点模型。
@@ -110,6 +111,8 @@ else:
 - `use_ompl / seed`：是否使用 RRT 回退及随机种子。OMPL 在每个进程第一次使用时初始化随机流，同进程后续调用沿用该流，不承诺重新搜索逐位复现。
 
 输入目标圆必须在场地内，并与实体车身有净空。`stops` 模式起点有目标侵入安全外扩区时，先尝试脱困，再规划全程拾取。`metrics.escape_goal_count` 标出 `goals` 开头必须按序执行的脱困动作数量。旧 `feasibility/length` 模式要求起点目标与安全轮廓分离，按运动中的接触消除，初始接触消除区的目标记录在 `initially_collected_ids`。
+
+`examples/fence.py` 演示围栏调用。车身安全外扩和消除器在直行、转向全程都必须严格位于围栏内，目标圆也不能碰边。围栏保存在 `resolved_request.fence`，可随规划结果一起归档回放。使用围栏时，独立脱困和局部修正可以接收同一份围栏。独立固定障碍物和栅格地图仍不属于 SDK 请求字段。
 
 `stops` 模式只在指定拾取停靠位消除目标，沿途和转向时不自动删除。即使目标一开始就在消除区，也需要一个显式拾取停靠。v0.2.1 起，合并一批的每个目标圆心都必须位于同一位置、同一朝向下的消除矩形内（含圆心在边界上，仅容许数值误差）；圆边缘相切或部分重叠、圆心在外均不算覆盖。不要求整个圆都进入。碰撞始终按完整圆计算并优先处理。目标在该停靠之前一直作为障碍；途中先后经过多个目标不会被算作“一停全清”。
 

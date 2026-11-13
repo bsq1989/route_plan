@@ -11,6 +11,7 @@ from typing import Mapping
 import yaml
 
 from route_plan_sim import Scene
+from route_plan_sim.boundary import Fence
 from route_plan_sim.config import default_robot_config
 from route_plan_sim.scene import normalize
 
@@ -52,10 +53,10 @@ class Target:
 
 @dataclass(frozen=True)
 class PlanningRequest:
-    width: float
-    height: float
-    pose: Pose
-    targets: tuple[Target, ...]
+    width: float | None = None
+    height: float | None = None
+    pose: Pose | None = None
+    targets: tuple[Target, ...] | None = None
     target_diameter: float = .10
     method: str = "length"
     timeout: float = 3.
@@ -65,8 +66,15 @@ class PlanningRequest:
     frame_id: str = "map"
     request_id: str | None = None
     schema_version: int = 1
+    fence: tuple[tuple[float, float], ...] | None = None
 
     def __post_init__(self):
+        if self.fence is not None:
+            fence = Fence.from_points(self.fence)
+            xmin, ymin, xmax, ymax = fence.bounds
+            object.__setattr__(self, "fence", fence.vertices)
+            object.__setattr__(self, "width", xmax - xmin)
+            object.__setattr__(self, "height", ymax - ymin)
         for name in ("width", "height", "timeout", "target_diameter"):
             value = _number(getattr(self, name), name)
             if value < 0 or value == 0 and name != "target_diameter":
@@ -121,6 +129,10 @@ class PlanningRequest:
         result = asdict(self)
         result["pose"] = list(self.pose)
         result["targets"] = [asdict(target) for target in self.targets]
+        if self.fence is not None:
+            result["fence"] = [list(point) for point in self.fence]
+        else:
+            del result["fence"]
         if isinstance(self.robot_config, Path):
             result["robot_config"] = str(self.robot_config)
         return result
@@ -194,6 +206,8 @@ def _empty_scene(request):
              "custom": {"random_count": 0, "target_diameter": request.target_diameter,
                         "pickup_rule": "center" if request.method == "stops" else "contact",
                         "collection_mode": "at_stop" if request.method == "stops" else "contact"}}
+    if request.fence is not None:
+        world["custom"]["fence"] = [list(point) for point in request.fence]
     with TemporaryDirectory(prefix="route-plan-input-") as directory:
         world_path, robot_path = Path(directory) / "world.yaml", Path(directory) / "robot.yaml"
         world_path.write_text(yaml.safe_dump(world), encoding="utf-8")

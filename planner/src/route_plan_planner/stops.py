@@ -191,6 +191,48 @@ class StopsPlanner:
     def __init__(self, options: PlannerOptions | None = None):
         self.options = options or PlannerOptions()
 
+    @staticmethod
+    def _candidate(scene, pose):
+        x, y, yaw = pose
+        c, s = math.cos(yaw), math.sin(yaw)
+        # The connector still checks both swept footprints along each motion.
+        scene.pose = pose
+        if math.isfinite(scene._wall_contact(0., 0.)):
+            return None
+        covered, blocked = set(), set()
+        for key, (tx, ty) in scene.targets.items():
+            u, v = c * (tx - x) + s * (ty - y), -s * (tx - x) + c * (ty - y)
+            if scene.collector.contains(u, v):
+                covered.add(key)
+            if scene.safety_body.intersects_circle(u, v, scene.target_radius):
+                blocked.add(key)
+        if covered:
+            return _Candidate(pose, frozenset(covered), frozenset(blocked))
+        return None
+
+    def _fence_candidates(self, scene, candidates, deadline):
+        # At a fence corner, pickup can require a narrow range of headings
+        # and the outer part of the collector's centre coverage.
+        covered = set().union(*(candidate.covered - candidate.blocked for candidate in candidates))
+        rect = scene.collector
+        lateral = (rect.ymin, (rect.ymin + rect.ymax) / 2, rect.ymax)
+        headings = max(360, self.options.headings)
+        for key, (tx, ty) in scene.targets.items():
+            if key in covered:
+                continue
+            for index in range(headings):
+                if time.monotonic() >= deadline:
+                    return
+                yaw = normalize(index * math.tau / headings)
+                c, s = math.cos(yaw), math.sin(yaw)
+                for depth in (rect.xmax, rect.xmax - min(.003, (rect.xmax - rect.xmin) / 2)):
+                    for offset in lateral:
+                        pose = (tx - c * depth + s * offset, ty - s * depth - c * offset, yaw)
+                        candidate = self._candidate(scene, pose)
+                        if candidate and key in candidate.covered - candidate.blocked:
+                            candidates.append(candidate)
+                            covered.update(candidate.covered - candidate.blocked)
+
     def _pool(self, scene, deadline, incumbent):
         points = list(scene.targets.values())
         anchors = set(points)
@@ -213,26 +255,15 @@ class StopsPlanner:
                 for depth in depths:
                     poses.add((tx - c * depth + s * offset, ty - s * depth - c * offset, normalize(angle)))
         candidates = []
+        at_pose = scene.clone()
         for pose in sorted(poses):
             if time.monotonic() >= deadline:
                 break
-            x, y, yaw = pose
-            c, s = math.cos(yaw), math.sin(yaw)
-            # Check both full footprints against the wall, including rotations
-            # later in the connector; this is only the cheap endpoint filter.
-            if any(not (EPS < x + c * u - s * v < scene.width - EPS
-                        and EPS < y + s * u + c * v < scene.height - EPS)
-                   for rect in (scene.safety_body, scene.collector) for u, v in rect.corners):
-                continue
-            covered, blocked = set(), set()
-            for key, (tx, ty) in scene.targets.items():
-                u, v = c * (tx - x) + s * (ty - y), -s * (tx - x) + c * (ty - y)
-                if scene.collector.contains(u, v):
-                    covered.add(key)
-                if scene.safety_body.intersects_circle(u, v, scene.target_radius):
-                    blocked.add(key)
-            if covered:
-                candidates.append(_Candidate(pose, frozenset(covered), frozenset(blocked)))
+            candidate = self._candidate(at_pose, pose)
+            if candidate:
+                candidates.append(candidate)
+        if scene.fence is not None:
+            self._fence_candidates(at_pose, candidates, deadline)
         return candidates
 
     def plan(self, scene: Scene, initial: PlanResult | None = None) -> PlanResult:
@@ -248,7 +279,8 @@ class StopsPlanner:
             # time, trials and OMPL detours for executable stops.
             seed_options = replace(self.options, timeout=self.options.timeout / 3 or self.options.timeout,
                                    max_trials=max(1, self.options.max_trials // 3),
-                                   max_expansions=max(1, self.options.max_expansions // 3), ompl=False)
+                                   max_expansions=max(1, self.options.max_expansions // 3),
+                                   ompl=self.options.ompl and scene.fence is not None)
             initial = StaticPlanner(seed_options).plan(contact)
         connector = DirectMotion(minimum_motion=True)
         seed = best = None

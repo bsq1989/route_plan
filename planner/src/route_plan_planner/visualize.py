@@ -19,14 +19,15 @@ def _canvas(scene, *, local=False, goals=()):
     fig, ax = plt.subplots(figsize=(10, 7), dpi=95)
     fig.patch.set_facecolor("#f1f4f9")
     ax.set_facecolor("white")
-    ax.set(xlim=(0, scene.width), ylim=(0, scene.height), aspect="equal",
+    xmin, ymin, xmax, ymax = scene.map_bounds
+    ax.set(xlim=(xmin, xmax), ylim=(ymin, ymax), aspect="equal",
            xlabel="横向位置 / 米", ylabel="纵向位置 / 米")
     if local:
         points = [*scene.path, *goals]
         xs, ys = [p[0] for p in points], [p[1] for p in points]
         pad = max(math.hypot(x, y) for rect in (scene.safety_body, scene.collector) for x, y in rect.corners) + .20
-        ax.set(xlim=(max(0, min(xs) - pad), min(scene.width, max(xs) + pad)),
-               ylim=(max(0, min(ys) - pad), min(scene.height, max(ys) + pad)))
+        ax.set(xlim=(max(xmin, min(xs) - pad), min(xmax, max(xs) + pad)),
+               ylim=(max(ymin, min(ys) - pad), min(ymax, max(ys) + pad)))
     ax.grid(alpha=.15)
     targets = TargetCircles(ax, facecolor="#f5a623", edgecolors="#b77915", zorder=5,
                             label=f"剩余目标（直径 {scene.target_diameter * 100:g} cm）")
@@ -38,9 +39,13 @@ def _canvas(scene, *, local=False, goals=()):
         ax.add_patch(patch)
     path, = ax.plot([], [], color="#6f9de5", lw=1.8, zorder=2)
     heading, = ax.plot([], [], color="white", lw=2, zorder=6)
-    ax.legend(handles=[Patch(facecolor="#f5a623", edgecolor="#b77915",
-                             label=f"剩余目标（直径 {scene.target_diameter * 100:g} cm）"), collected],
-              loc="upper right", fontsize=9)
+    legend = [Patch(facecolor="#f5a623", edgecolor="#b77915",
+                    label=f"剩余目标（直径 {scene.target_diameter * 100:g} cm）"), collected]
+    if scene.fence is not None:
+        fence = Polygon(scene.fence.vertices, fill=False, edgecolor="#475569", lw=1.5, label="场地围栏")
+        ax.add_patch(fence)
+        legend.append(fence)
+    ax.legend(handles=legend, loc="upper right", fontsize=9)
     title = ax.set_title("静态目标自动消除", pad=14, fontsize=15)
     fig.text(.5, .025, "蓝色：车身    橙色虚线：安全轮廓    绿色：前置消除区    回放采用仿真连续碰撞规则",
              ha="center", fontsize=9, color="#52627b")
@@ -146,9 +151,12 @@ def save_comparison(scene: Scene, a_goals, b_goals, output: Path):
     fig.patch.set_facecolor("#f1f4f9")
     for ax, final, label, color, length in zip(
             axes, (a, b), ("A  可行性 baseline", "B  路径长度优化"), ("#3568e8", "#159477"), lengths):
-        ax.set(xlim=(0, scene.width), ylim=(0, scene.height), aspect="equal",
+        xmin, ymin, xmax, ymax = scene.map_bounds
+        ax.set(xlim=(xmin, xmax), ylim=(ymin, ymax), aspect="equal",
                xlabel="横向位置 / 米", ylabel="纵向位置 / 米")
         ax.grid(alpha=.15)
+        if scene.fence is not None:
+            ax.add_patch(Polygon(scene.fence.vertices, fill=False, edgecolor="#475569", lw=1.5))
         if scene.targets:
             targets = TargetCircles(ax, facecolor="#f5a623", edgecolors="#b77915", linewidths=.5, zorder=3)
             targets.set_targets(scene.targets.values(), scene.target_radius)

@@ -29,6 +29,9 @@ def _simulation_requests(request, limit):
         return request, request
     if not isinstance(request, Mapping):
         raise ValueError("Request must be a mapping")
+    if request.get("fence") is not None:
+        request = replace(PlanningRequest.from_dict(request), method="stops")
+        return request, request
     width, height = request.get("width"), request.get("height")
     if (width is None) != (height is None):
         raise ValueError("Provide both width and height, or omit both for local pickup")

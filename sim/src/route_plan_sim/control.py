@@ -33,7 +33,7 @@ class PoseController:
             raise ValueError("Reset the scene after a collision")
         px, py, theta = self.scene.pose
         dx, dy = x - px, y - py
-        if not (0 < x < self.scene.width and 0 < y < self.scene.height):
+        if not self.scene.contains_disk(x, y):
             raise ValueError("Goal must be inside the map")
         if dx * math.cos(theta) + dy * math.sin(theta) < -EPS:
             raise ValueError("Goal is behind the robot")

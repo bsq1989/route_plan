@@ -14,9 +14,9 @@ import math
 import random
 from pathlib import Path
 
+from .boundary import EPS, Fence, trig_times
 from .config import load_config
 
-EPS = 1e-9
 DEFAULT_CONFIG = files(__package__).joinpath("world.yaml")
 
 
@@ -29,24 +29,6 @@ def finite(value: float) -> float:
 
 def normalize(angle: float) -> float:
     return (angle + math.pi) % math.tau - math.pi
-
-
-def trig_times(a: float, b: float, value: float, delta: float) -> list[float]:
-    """Solve a*cos(delta*t) + b*sin(delta*t) = value, 0 <= t <= 1."""
-    radius = math.hypot(a, b)
-    if radius < EPS or abs(delta) < EPS or abs(value) > radius + EPS:
-        return []
-    phase = math.atan2(b, a)
-    alpha = math.acos(max(-1.0, min(1.0, value / radius)))
-    low, high = sorted((0.0, delta))
-    result = []
-    for root in (phase - alpha, phase + alpha):
-        for k in range(math.ceil((low - root - EPS) / math.tau),
-                       math.floor((high - root + EPS) / math.tau) + 1):
-            t = (root + k * math.tau) / delta
-            if -EPS <= t <= 1 + EPS:
-                result.append(max(0.0, min(1.0, t)))
-    return result
 
 
 @dataclass(frozen=True)
@@ -157,6 +139,17 @@ class Scene:
             raise ValueError("Unsupported pickup_rule")
         custom["pickup_rule"] = self.pickup_rule
         self.width, self.height = finite(world["width"]), finite(world["height"])
+        self.fence = Fence.from_points(custom["fence"]) if custom.get("fence") is not None else None
+        if self.fence is not None:
+            xmin, ymin, xmax, ymax = self.fence.bounds
+            self.width, self.height = xmax - xmin, ymax - ymin
+            world.update(width=self.width, height=self.height, offset=[xmin, ymin])
+            custom["fence"] = [list(point) for point in self.fence.vertices]
+            self.map_bounds = self.fence.bounds
+        else:
+            if world.get("offset", [0, 0]) != [0, 0]:
+                raise ValueError("This scene requires world.offset = [0, 0]")
+            self.map_bounds = (0., 0., self.width, self.height)
         if finite(world["step_time"]) <= 0:
             raise ValueError("step_time must be positive")
         self.target_diameter = finite(custom.get("target_diameter", .1)
@@ -171,14 +164,14 @@ class Scene:
         obstacle_values = custom.get("obstacles", ()) if obstacles is None else obstacles
         self.obstacles = tuple(tuple(map(finite, disk)) for disk in obstacle_values)
         for x, y, radius in self.obstacles:
-            if not 0 < radius < min(x, y, self.width - x, self.height - y):
+            inside = (self.fence.contains_disk(x, y, radius) if self.fence is not None
+                      else radius < min(x, y, self.width - x, self.height - y))
+            if radius <= 0 or not inside:
                 raise ValueError("Obstacle disks must have positive radius and fit inside the map")
         if self.obstacles or "obstacles" in custom:
             custom["obstacles"] = [list(disk) for disk in self.obstacles]
         if robot["shape"]["name"] != "rectangle":
             raise ValueError("This scene requires a rectangular robot")
-        if world.get("offset", [0, 0]) != [0, 0]:
-            raise ValueError("This scene requires world.offset = [0, 0]")
         self.body = Rect(-length / 2, -width / 2, length / 2, width / 2)
         self.body_margin = finite(custom.get("body_margin", 0) if body_margin is None else body_margin)
         if self.body_margin < 0:
@@ -208,6 +201,11 @@ class Scene:
         c, s = math.cos(theta), math.sin(theta)
         dx, dy = x - px, y - py
         return c * dx + s * dy, -s * dx + c * dy
+
+    def contains_disk(self, x: float, y: float, radius: float = 0.) -> bool:
+        if self.fence is not None:
+            return self.fence.contains_disk(x, y, radius)
+        return radius + EPS < x < self.width - radius - EPS and radius + EPS < y < self.height - radius - EPS
 
     def clone(self) -> Scene:
         """Copy an episode for speculative planning, without reloading files.
@@ -408,11 +406,13 @@ class Scene:
             while len(self.targets) < count and attempts < max(1000, count * 100):
                 attempts += 1
                 inset = max(.1, self.target_radius + 2 * EPS)
-                tx, ty = rng.uniform(inset, self.width - inset), rng.uniform(inset, self.height - inset)
+                xmin, ymin, xmax, ymax = self.map_bounds
+                tx, ty = rng.uniform(xmin + inset, xmax - inset), rng.uniform(ymin + inset, ymax - inset)
                 lx, ly = self.local_point(tx, ty)
                 if (not self.safety_body.intersects_circle(lx, ly, self.target_radius)
                         and not self.collector.intersects_circle(lx, ly, self.target_radius)
                         and not self._overlaps_target(tx, ty)
+                        and self.contains_disk(tx, ty, self.target_radius)
                         and not self._overlaps_obstacle(tx, ty)):
                     self.add_target(tx, ty)
             if len(self.targets) != count:
@@ -436,8 +436,7 @@ class Scene:
         radius = self.target_radius
         intrusions = set()
         for index, (x, y) in enumerate(points):
-            if not (radius + EPS < x < self.width - radius - EPS
-                    and radius + EPS < y < self.height - radius - EPS):
+            if not self.contains_disk(x, y, radius):
                 raise ValueError("Target must be inside the map")
             if self._overlaps_obstacle(x, y):
                 raise ValueError("Target touches an obstacle")
@@ -468,6 +467,9 @@ class Scene:
                 del self.targets[key]
 
     def _wall_contact(self, distance: float, rotation: float) -> float:
+        if self.fence is not None:
+            return min(self.fence.first_contact(rect, self.pose, distance, rotation)
+                       for rect in (self.safety_body, self.collector))
         x, y, theta = self.pose
         first = math.inf
         for rect in (self.safety_body, self.collector):
@@ -575,4 +577,6 @@ class Scene:
                 "dimensions": self.dimensions, "target_diameter": self.target_diameter}
         if self.obstacles:
             result["obstacles"] = [list(disk) for disk in self.obstacles]
+        if self.fence is not None:
+            result["fence"] = [list(point) for point in self.fence.vertices]
         return result
