@@ -27,7 +27,6 @@ class Regions:
     approach_tolerance_m: float
     precision_range_m: float
     auto_fence_radius_m: float
-    coarse_radial_error: float
     miss_probability: float
     maximum_rounds: int
 
@@ -38,7 +37,7 @@ class Regions:
                 or not 0 < self.pickup_inner_radius_m < self.pickup_outer_radius_m
                 or min(self.view_range_m, self.precision_range_m, self.auto_fence_radius_m) <= 0
                 or not 0 <= self.approach_tolerance_m <= self.pickup_outer_radius_m - self.pickup_inner_radius_m
-                or not 0 <= self.coarse_radial_error < 1 or not 0 <= self.miss_probability <= 1
+                or not 0 <= self.miss_probability <= 1
                 or type(self.maximum_rounds) is not int or self.maximum_rounds < 1):
             raise ValueError("Invalid directional regions")
 
@@ -64,20 +63,32 @@ class DirectionalScene:
         case = options["cases"][name]
         params = {key: case.get(key, value) for key, value in options.items() if key != "cases"}
         self.regions = Regions(**params)
-        world = {"world": config["world"], "robot": {**config["robot"]},
+        world = {"world": {**config["world"], **case.get("world", {})}, "robot": {**config["robot"]},
                  "custom": {key: value for key, value in config["custom"].items() if key != "directional"}}
         world["custom"].update(collection_mode="at_stop", pickup_rule="center")
         world["robot"]["state"] = case.get("pose", world["robot"]["state"])
+        random_count = case.get("random_count")
+        if random_count is not None:
+            if "targets" in case:
+                raise ValueError("Provide targets or random_count for a directional case")
+            world["custom"]["random_count"] = random_count
+            if "random_require_turn_clearance" in case:
+                world["custom"]["random_require_turn_clearance"] = case["random_require_turn_clearance"]
         if robot_config is None and world["custom"].get("robot_config"):
             raise ValueError("Pass the resolved robot config path")
         with TemporaryDirectory(prefix="directional-") as directory:
             path = Path(directory) / "world.yaml"
             path.write_text(yaml.safe_dump(world), encoding="utf-8")
-            self._scene = Scene(path, scenario="empty", seed=seed, robot_config=robot_config,
+            self._scene = Scene(path, scenario="random" if random_count is not None else "empty",
+                                seed=seed, robot_config=robot_config,
                                 obstacles=case.get("obstacles"))
-        self._scene.add_targets(case["targets"])
+        if random_count is None:
+            self._scene.add_targets(case["targets"])
         self._planner_request = planner_request
         self._noise = Random(seed)
+        self._next_detection_id = 1
+        self._frame_targets = {}
+        self._precise_targets = set()
         self.observations, self.actions, self.trace = [], [], []
         self.initial = self._scene.snapshot()
         self.world_config = deepcopy(self._scene.config)
@@ -89,9 +100,14 @@ class DirectionalScene:
     def pose(self):
         return self._scene.pose
 
+    @property
+    def all_collected(self):
+        return not self._scene.targets
+
     def capture(self):
         scene, params = self._scene, self.regions
         detections = []
+        self._frame_targets = {}
         for key, point in scene.targets.items():
             distance, angle = relative(scene.pose, point)
             if distance > params.view_range_m + EPS or abs(angle) > math.radians(params.view_angle_deg / 2) + EPS:
@@ -101,12 +117,15 @@ class DirectionalScene:
                 continue
             if params.miss_probability and self._noise.random() < params.miss_probability:
                 continue
-            precise = distance <= params.precision_range_m + EPS
-            xy = point
-            if not precise:
-                factor = 1 + self._noise.uniform(-params.coarse_radial_error, params.coarse_radial_error)
-                xy = tuple(origin + (target - origin) * factor for origin, target in zip(scene.pose, point))
-            detections.append({"id": key, "xy_m": xy, "quality": "precise" if precise else "coarse"})
+            detection_id = self._next_detection_id
+            self._next_detection_id += 1
+            self._frame_targets[detection_id] = key
+            if distance <= params.precision_range_m + EPS:
+                self._precise_targets.add(key)
+                detections.append({"id": detection_id, "xy_m": point, "quality": "precise"})
+            else:
+                detections.append({"id": detection_id, "quality": "bearing", "origin_xy_m": scene.pose[:2],
+                                   "bearing_map_rad": normalize(angle + scene.pose[2])})
         frame = {"index": len(self.observations), "time_s": self.time, "pose": scene.pose, "frame_id": "map",
                  "view_range_m": params.view_range_m, "view_angle_deg": params.view_angle_deg,
                  "trace_index": len(self.trace) - 1, "detections": detections}
@@ -142,7 +161,31 @@ class DirectionalScene:
             auto_fence_radius_m=self.regions.auto_fence_radius_m, targets=targets, timeout=2.,
         )
 
-    def execute_pickups(self, goals, stops, allowed_ids):
+    def execute_pickups(self, goals, stops, allowed_ids, *, frame_index=None, target_positions=None):
+        if frame_index is not None or target_positions is not None:
+            if (not self.observations or frame_index != len(self.observations) - 1
+                    or self.observations[-1]["pose"] != self.pose):
+                return self._reject("pickup", "stale_or_invalid_detection", goals)
+            if target_positions is None:
+                ids = {d["id"]: self._frame_targets[d["id"]] for d in self.observations[-1]["detections"]
+                       if d["quality"] == "precise"}
+            else:
+                # A regional batch gets fresh request IDs. Resolve only points
+                # that have actually been measured in this simulation.
+                radius = self.regions.precision_range_m
+                candidates = {}
+                for key, point in self._scene.targets.items():
+                    if key in self._precise_targets and math.dist(self.pose[:2], point) <= radius + EPS:
+                        candidates.setdefault(point, []).append(key)
+                ids = {}
+                for key, point in target_positions.items():
+                    matches = candidates.get(tuple(point))
+                    if matches:
+                        ids[key] = matches.pop()
+            if not set(allowed_ids) <= ids.keys() or any(not set(stop["target_ids"]) <= ids.keys() for stop in stops):
+                return self._reject("pickup", "stale_or_invalid_detection", goals)
+            allowed_ids = [ids[key] for key in allowed_ids]
+            stops = [{**stop, "target_ids": [ids[key] for key in stop["target_ids"]]} for stop in stops]
         return self._run("pickup", goals, stops, allowed_ids)
 
     def _reject(self, stage, reason, goals=()):

@@ -44,14 +44,28 @@ def configure_chinese_font():
 
 def make_environment(scene: Scene, display: bool):
     """Give IR-SIM the resolved map and the same vehicle geometry as Scene."""
-    xmin, ymin, _, _ = scene.map_bounds
-    config = {**scene.config, "world": {
-        **scene.config["world"], "width": scene.width, "height": scene.height, "offset": [xmin, ymin],
+    return make_environment_from_config(scene.config, scene.map_bounds, display)
+
+
+def make_environment_from_config(config, bounds, display):
+    xmin, ymin, xmax, ymax = bounds
+    config = {**config, "world": {
+        **config["world"], "width": xmax - xmin, "height": ymax - ymin, "offset": [xmin, ymin],
     }}
     with TemporaryDirectory(prefix="route-plan-scene-") as directory:
         resolved = Path(directory) / "world.yaml"
         resolved.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
         return irsim.make(str(resolved), display=display, step_mode="external", log_level="ERROR")
+
+
+def disable_environment_keyboard(env, canvas):
+    """Let the viewer own keys that would otherwise mutate the IR-SIM state."""
+    if env.keyboard:
+        for name in ("_mpl_press_cid", "_mpl_release_cid", "_mpl_enter_cid",
+                     "_mpl_leave_cid", "_mpl_close_cid"):
+            if (cid := getattr(env.keyboard, name, None)) is not None:
+                canvas.mpl_disconnect(cid)
+        env.keyboard.close()
 
 
 def error_text(error: ValueError) -> str:
@@ -89,15 +103,7 @@ class Viewer:
         # IR-SIM 2.12.0 exposes its Matplotlib canvas through EnvPlot. Keep this
         # version-specific access here; the episode API never depends on it.
         self.fig, self.ax = self.env._env_plot.fig, self.env._env_plot.ax
-        # Our controls own reset/pause, avoiding IR-SIM shortcuts resetting only
-        # the robot while leaving task targets behind.
-        if self.env.keyboard:
-            for name in ("_mpl_press_cid", "_mpl_release_cid", "_mpl_enter_cid",
-                         "_mpl_leave_cid", "_mpl_close_cid"):
-                cid = getattr(self.env.keyboard, name, None)
-                if cid is not None:
-                    self.fig.canvas.mpl_disconnect(cid)
-            self.env.keyboard.close()
+        disable_environment_keyboard(self.env, self.fig.canvas)
         self.fig.canvas.manager.set_window_title("路径规划｜IR-SIM 二维仿真沙盒")
         self.fig.set_size_inches(14.2, 9.4, forward=True)
         self.fig.set_facecolor("#f1f4f9")

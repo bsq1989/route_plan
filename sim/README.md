@@ -123,14 +123,32 @@ uv run --project planner route-plan solve --config sim/config/measured-fence.yam
 ## 定向接近与分区拾取
 
 ```bash
-uv run --project planner python -m route_plan_planner.directional --case all --seed 42
+uv run --project planner python -m route_plan_planner.directional --case two-clusters --seed 42 --show
+uv run --project planner python -m route_plan_planner.directional --case random-40 --seed 42 --show
+uv run --project planner python -m route_plan_planner.directional --case two-clusters --seed 42 --gif --snapshot
 ```
 
-从仓库根目录运行。每个用例生成一份自包含 HTML 和同名 JSON，默认输出到 `sim/output/directional/`。用 `--case two-clusters` 可单独跑完整流程。HTML 支持播放、暂停、单步和拖动进度。JSON 保留观测、候选 yaw、动作拒绝原因、SDK 请求和响应、全轨迹及汇总指标。SDK 响应中的实测运行耗时随机器和运行次数变化。
+从仓库根目录运行。`--show` 在 IR-SIM 窗口中显示发现扇区、拾取圆环、目标连线和生效中的 `auto_fence`。空格播放或暂停，左右键逐帧，进度条可拖动。`--gif` 和 `--snapshot` 从同一个 IR-SIM 画布离屏导出。每个用例都生成同名 JSON，默认输出到 `sim/output/directional/`。加 `--html` 可额外导出网页回放。
+
+`--case all` 批量运行所有用例。`random-40` 沿用常规随机仿真的 12 × 9 m 场地、起始位姿和 40 件撒点规模。JSON 保留观测、候选 yaw、动作拒绝原因、SDK 请求和响应、完整轨迹及汇总指标。SDK 响应中的实际运行耗时随机器和运行次数变化。
+
+`random-40-interior` 在相同场地把 40 个圆心投放到可转向的内区。`random_require_turn_clearance` 按车身安全矩形与消除器最远角到 `base_link` 的距离，再加目标半径，计算圆心到场地边界的最小间距。默认车型约为 0.681 m。此设置只影响目标生成，车辆仍在原有场地内按同一套避碰和围栏规则执行。
 
 [directional.yaml](src/route_plan_sim/directional.yaml) 可编辑场地、物品、遮挡和发现扇区、清理圆环、精测距离及局部 `auto_fence` 半径。把 `world`、`robot`、`custom.fence_enabled` 和 `custom.fence` 改为所需围栏配置，再设置围栏内的用例位姿和物品即可换场地。默认圆环为 0.75–1.4 m / 60°，精测距离与 `auto_fence` 分别配置，默认均为 1.4 m。
 
 `DirectionalScene` 提供 `pose`、`capture()`、`turn(yaw)`、`forward(metres)` 和 `execute_pickups(goals, stops, allowed_ids)`。动作返回状态、实际首尾位姿及原因。局部计划先在完整场景副本中执行，触碰边界、碰到漏检物品或拾取不符时整次拒绝。示例 `CoveragePolicy` 使用已观测目标连线选方向；可通过 `run_case(..., policy=...)` 替换策略。
+
+发现扇区默认以车头为中心，半径为 5 m，展开角为 90°。在扇区内且距离 `base_link` 不超过 1.4 m 的无遮挡目标提供精测 `xy_m`。超过精测距离时，观测只保存拍摄位置 `origin_xy_m` 和 `map` 方位角 `bearing_map_rad`。
+
+首帧和每次停稳后，优先把已实际精测、尚未确认拾取且仍在当前 `base_link` 精测半径内的点交给局部 `plan`。这批点允许位于拾取圆环的内沿以内或车侧，也可以来自此前的精测帧。局部路线继续遵守 `auto_fence`、连续避碰和停靠规则。拾取后重新观测并处理附近剩余的精测点。
+
+搜索按 `覆盖线索数 − 0.5 × 接近距离 / 精测半径 − 0.5 × 转角 / π` 选方向。已有精测坐标时用当前位置到精测范围的距离作为接近代价。只有方位时按下一段 0.40 m 动作计费。每段直行和转向都在完整场景副本检查车身扫掠，漏检物品也参与避碰。
+
+沿方位前进后，上一车位射线若有一段落进当前精测半径且滑出相机视野，可以原地补测一次，最大补测转角为 12°。未精测到目标就恢复朝向，可在下一段停稳后再检查一次。射线只用来算补测方向，精测仍由相机观测提供。区域拾取结束后从新车位重测原搜索方向，已覆盖的视野参与去重。
+
+切换搜索区域前，当前帧的方位线索可与最近四处停车位的方位射线相交，用来估计短距离接近的收益。交角过小、交点落在观测距离外或接近代价过大的组合会被跳过。候选按接近距离和转角排序，每次先验证转向并复测，确认该方向仍有方位线索才向前走一段，最长 0.40 m。交点只用于选观测方向，实际精测坐标才进入拾取批次。拾取确认后会清理指向该物品的历史方位。
+
+检测 ID 每帧更新，局部批次按坐标生成当次请求 ID。只有精测帧给出的 `map` 坐标进入位置记忆，确认拾取才移除。原地复测替换当帧视野里的方位线索，平移后从新车位建立线索。仿真在最后一件确认拾取后结束回合。
 
 ## 给后续算法的接口
 

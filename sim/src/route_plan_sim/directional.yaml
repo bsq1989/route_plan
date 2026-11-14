@@ -11,7 +11,7 @@ custom:
   seed: 42
   random_count: 0
   directional:
-    view_range_m: 3.0
+    view_range_m: 5.0
     view_angle_deg: 90
     pickup_inner_radius_m: 0.75
     pickup_outer_radius_m: 1.4
@@ -19,12 +19,19 @@ custom:
     approach_tolerance_m: 0.05
     precision_range_m: 1.4
     auto_fence_radius_m: 1.4
-    coarse_radial_error: 0.06
     miss_probability: 0
     maximum_rounds: 20
     cases:
       two-clusters:
         targets: [[2.04, 2.87], [1.97, 2.92], [1.73, 2.74], [1.81, 1.62]]
+      random-40: &random_40
+        world: {width: 12, height: 9}
+        pose: [3, 4.5, 0]
+        random_count: 40
+        maximum_rounds: 80
+      random-40-interior:
+        <<: *random_40
+        random_require_turn_clearance: true
       near-mid-far:
         targets: [[1.20, 1.57], [1.40, 1.95], [0.98, 2.32], [1.30, 3.30]]
         pose: [1.20, 0.65, 1.5707963267948966]

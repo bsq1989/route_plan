@@ -22,17 +22,25 @@ def run_case(name, seed=42, config_path=None, *, policy=CoveragePolicy):
     agent = policy(sim, plan)
     frame = agent.capture()
     if case.get("probe_initial_heading") and frame["detections"]:
-        frame = agent.approach(frame["detections"][0]["id"], frame)
-        agent.pickup(frame)
-        frame = agent.capture()
+        success, _ = agent.pickup(frame)
+        if not success:
+            frame = agent.approach(frame["detections"][0], frame)
+            agent.pickup(frame)
+        if not sim.all_collected:
+            frame = agent.capture()
     reason, tried = "round_limit", set()
     last_failure = None
     for _ in range(sim.regions.maximum_rounds):
+        if sim.all_collected:
+            break
         start_xy = sim.pose[:2]
         ok, latest_reason = agent.evaluate(frame, tried)
         if not ok and latest_reason != "no_safe_heading":
             last_failure = latest_reason
         if not ok:
+            if sim.pose[:2] != start_xy:
+                frame = agent.capture()
+                continue
             scan_pose = sim.pose[:2]
             for frame in agent.scan():
                 ok, next_reason = agent.evaluate(frame, tried)
@@ -41,14 +49,17 @@ def run_case(name, seed=42, config_path=None, *, policy=CoveragePolicy):
                 if next_reason != "no_safe_heading":
                     last_failure = next_reason
         if not ok:
-            if sim.pose[:2] != scan_pose or sim.pose[:2] != start_xy:
+            if sim.pose[:2] != scan_pose:
                 frame = agent.capture()
                 continue
             reason = (last_failure or "no_safe_heading") if agent.memory else "no_observed_targets"
             break
         tried.clear()
         last_failure = None
-        agent.frames_seen.clear()
+        # The simulator can end an episode when its objective is satisfied.
+        # CoveragePolicy still decides solely from observations and feedback.
+        if sim.all_collected:
+            break
         frame = agent.capture()
     final = sim.final_state()
     if not final["remaining"]:
@@ -82,18 +93,30 @@ def main(argv=None):
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--config", type=Path)
     parser.add_argument("--output", type=Path, default=Path("sim/output/directional"))
+    parser.add_argument("--show", action="store_true", help="打开 IR-SIM 窗口")
+    parser.add_argument("--gif", action="store_true", help="离屏导出 IR-SIM GIF")
+    parser.add_argument("--snapshot", action="store_true", help="导出拾取阶段的 IR-SIM 截图")
+    parser.add_argument("--html", action="store_true", help="额外导出 HTML 回放")
     args = parser.parse_args(argv)
     try:
         cases = load_config(args.config)["custom"]["directional"]["cases"]
         if args.case not in cases and args.case != "all":
             parser.error(f"未知场景 {args.case}，可选 {', '.join(cases)}")
-        from .direction_replay import write_replay
-
         for name in cases if args.case == "all" else (args.case,):
             record = run_case(name, args.seed, args.config)
-            write_json(args.output / f"{name}.json", record)
-            write_replay(args.output / f"{name}.html", record)
-            print(f"{name}: {record['stop_reason']} · picked {len(record['collected'])} · {args.output / (name + '.html')}")
+            output = args.output / f"{name}.json"
+            write_json(output, record)
+            print(f"{name}: {record['stop_reason']} · picked {len(record['collected'])} · {output}", flush=True)
+            if args.html:
+                from .direction_replay import write_replay
+
+                write_replay(output.with_suffix(".html"), record)
+            if args.show or args.gif or args.snapshot:
+                from route_plan_sim.directional_viewer import show_replay
+
+                show_replay(record, show=args.show,
+                            gif=output.with_suffix(".gif") if args.gif else None,
+                            snapshot=output.with_suffix(".png") if args.snapshot else None)
     except (ValueError, KeyError, OSError) as error:
         parser.error(str(error))
     return 0

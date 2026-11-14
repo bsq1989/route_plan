@@ -419,15 +419,31 @@ class Scene:
                 self.add_target(x + c * dx - s * dy, y + s * dx + c * dy)
         else:
             rng = random.Random(self.seed)
-            count = int(self.config["custom"]["random_count"])
+            custom = self.config["custom"]
+            count = int(custom["random_count"])
             if count < 0:
                 raise ValueError("random_count must be nonnegative")
+            require_turn_clearance = custom.get("random_require_turn_clearance", False)
+            if not isinstance(require_turn_clearance, bool):
+                raise ValueError("random_require_turn_clearance must be boolean")
+            inset = max(.1, self.target_radius + 2 * EPS)
+            if require_turn_clearance:
+                swept_radius = max(math.hypot(x, y) for rect in (self.safety_body, self.collector)
+                                   for x, y in rect.corners)
+                inset = max(inset, swept_radius + self.target_radius + 2 * EPS)
+            xmin, ymin, xmax, ymax = self.map_bounds
+            if count and require_turn_clearance and 2 * inset >= min(xmax - xmin, ymax - ymin):
+                raise ValueError("Not enough room to place targets with turn clearance")
             attempts = 0
             while len(self.targets) < count and attempts < max(1000, count * 100):
                 attempts += 1
-                inset = max(.1, self.target_radius + 2 * EPS)
-                xmin, ymin, xmax, ymax = self.map_bounds
                 tx, ty = rng.uniform(xmin + inset, xmax - inset), rng.uniform(ymin + inset, ymax - inset)
+                if require_turn_clearance and (
+                    not self.contains_disk(tx, ty, inset) or not self.contains_motion_point(tx, ty)
+                    or any(math.hypot(tx - ox, ty - oy) <= radius + inset + EPS
+                           for ox, oy, radius in self.obstacles)
+                ):
+                    continue
                 lx, ly = self.local_point(tx, ty)
                 if (not self.safety_body.intersects_circle(lx, ly, self.target_radius)
                         and not self.collector.intersects_circle(lx, ly, self.target_radius)

@@ -36,7 +36,7 @@ dt{font-size:12px;color:#51625d}dd{margin:3px 0 13px;font-variant-numeric:tabula
 <canvas width="640" height="560" aria-label="map 坐标轨迹、发现扇区和拾取圆环"></canvas>
 <div class="legend">
 <span><i style="--color:#4b91ba"></i>发现扇区</span><span><i style="--color:#48a383"></i>拾取圆环</span>
-<span><i style="--color:#885ab9"></i>auto_fence</span><span><i style="--color:#c17319"></i>粗测</span>
+<span><i style="--color:#885ab9"></i>auto_fence</span><span><i style="--color:#c17319"></i>方位线索</span>
 <span><i style="--color:#116659"></i>精测</span><span><i style="--color:#db4f41"></i>当批</span>
 <span><i style="--color:#889589"></i>已拾取</span><span><i style="--color:#c7d2c9"></i>场景真值</span>
 </div>
@@ -101,6 +101,9 @@ function render(){
   const candidate=decision?.selected;
   const plan=data.plans.findLast(item=>item.trace_index<=index);
   const batchIds=new Set(frame.auto_fence ? (plan?.batch_ids||[]).map(String) : []);
+  const batchPoints=new Set(frame.auto_fence ? (plan?.request?.targets||[]).map(p=>`${p.x},${p.y}`) : []);
+  const pickedPoints=new Set([...used].map(id=>String(targets[id])));
+  const pickedSinceObservation=observation && used.size!==frames[observation.trace_index].collected_ids.length;
   ctx.clearRect(0,0,640,560);ctx.lineWidth=1;
   path(fence,"#fff",null);ctx.save();ctx.clip();
   for(let px=Math.ceil(xmin*2)/2;px<xmax;px+=.5)path([[px,ymin],[px,ymax]],null,"#e8efea",false);
@@ -115,9 +118,15 @@ function render(){
   }
   for(const item of (observation?.known||[])){
     const id=String(item.id);
-    if(used.has(id))continue;
-    const color=batchIds.has(id)?"#db4f41":item.quality==="precise"?"#116659":"#c17319";
-    ctx.setLineDash(item.quality==="coarse"?[4,4]:[]);
+    if(item.quality==="bearing" ? pickedSinceObservation : pickedPoints.has(String(item.xy_m)))continue;
+    const color=batchPoints.has(String(item.xy_m))?"#db4f41":item.quality==="precise"?"#116659":"#c17319";
+    ctx.setLineDash(item.quality==="precise"?[]:[4,4]);
+    if(item.quality==="bearing"){
+      const [ox,oy]=item.origin_xy_m, angle=item.bearing_map_rad, span=regions.view_range_m;
+      path([[ox,oy],[ox+span*Math.cos(angle),oy+span*Math.sin(angle)]],null,color,false);
+      ctx.setLineDash([]);
+      continue;
+    }
     path([[x,y],item.xy_m],null,color,false);ctx.setLineDash([]);
     disk(...item.xy_m,.041,color,"#fff");ctx.fillStyle=color;
     const [px,py]=xy(...item.xy_m);ctx.font="13px system-ui";ctx.fillText("#"+id,px+6,py-6);
