@@ -120,6 +120,18 @@ uv run --project planner route-plan solve --config sim/config/measured-fence.yam
 
 顶点按围栏边界顺序排列，坐标为 map 下的米。实测配置直接使用 Gateway 回归中已内缩 16 cm 的有效顶点。车身安全轮廓和消除器在直行与原地转向时都检查连续触边。用 `PlanningRequest.from_scene(scene, method="stops")` 可把同一份边界和场景快照传给 SDK。
 
+## 定向接近与分区拾取
+
+```bash
+uv run --project planner python -m route_plan_planner.directional --case all --seed 42
+```
+
+从仓库根目录运行。每个用例生成一份自包含 HTML 和同名 JSON，默认输出到 `sim/output/directional/`。用 `--case two-clusters` 可单独跑完整流程。HTML 支持播放、暂停、单步和拖动进度。JSON 保留观测、候选 yaw、动作拒绝原因、SDK 请求和响应、全轨迹及汇总指标。SDK 响应中的实测运行耗时随机器和运行次数变化。
+
+[directional.yaml](src/route_plan_sim/directional.yaml) 可编辑场地、物品、遮挡和发现扇区、清理圆环、精测距离及局部 `auto_fence` 半径。把 `world`、`robot`、`custom.fence_enabled` 和 `custom.fence` 改为所需围栏配置，再设置围栏内的用例位姿和物品即可换场地。默认圆环为 0.75–1.4 m / 60°，精测距离与 `auto_fence` 分别配置，默认均为 1.4 m。
+
+`DirectionalScene` 提供 `pose`、`capture()`、`turn(yaw)`、`forward(metres)` 和 `execute_pickups(goals, stops, allowed_ids)`。动作返回状态、实际首尾位姿及原因。局部计划先在完整场景副本中执行，触碰边界、碰到漏检物品或拾取不符时整次拒绝。示例 `CoveragePolicy` 使用已观测目标连线选方向；可通过 `run_case(..., policy=...)` 替换策略。
+
 ## 给后续算法的接口
 
 几何规则在 `scene.py`，导入时不创建窗口，也不加载 IR-SIM：

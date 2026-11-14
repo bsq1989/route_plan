@@ -1,0 +1,53 @@
+world:
+  width: 2.8
+  height: 4.2
+  step_time: 0.04
+robot:
+  state: [0.8, 2.1, 0]
+custom:
+  collection_mode: at_stop
+  pickup_rule: center
+  target_diameter: 0.10
+  seed: 42
+  random_count: 0
+  directional:
+    view_range_m: 3.0
+    view_angle_deg: 90
+    pickup_inner_radius_m: 0.75
+    pickup_outer_radius_m: 1.4
+    pickup_angle_deg: 60
+    approach_tolerance_m: 0.05
+    precision_range_m: 1.4
+    auto_fence_radius_m: 1.4
+    coarse_radial_error: 0.06
+    miss_probability: 0
+    maximum_rounds: 20
+    cases:
+      two-clusters:
+        targets: [[2.04, 2.87], [1.97, 2.92], [1.73, 2.74], [1.81, 1.62]]
+      near-mid-far:
+        targets: [[1.20, 1.57], [1.40, 1.95], [0.98, 2.32], [1.30, 3.30]]
+        pose: [1.20, 0.65, 1.5707963267948966]
+      offset:
+        targets: [[2.1, 2.4]]
+        probe_initial_heading: true
+      offset-unreachable:
+        targets: [[2.1, 2.95]]
+        probe_initial_heading: true
+      occlusion:
+        targets: [[1.69, 2.12], [2.20, 2.132]]
+      blocked:
+        pose: [0.58, 2.1, 0]
+        targets: [[1.54, 2.1], [1.70, 2.33]]
+        obstacles: [[1.30, 2.24, 0.10], [1.30, 1.96, 0.10]]
+      fence-limit:
+        targets: [[1.85, 2.10]]
+        auto_fence_radius_m: 0.10
+      coarse-only:
+        targets: [[1.95, 2.08]]
+        precision_range_m: 0.60
+      empty:
+        targets: []
+      intermittent:
+        targets: [[1.69, 2.12]]
+        miss_probability: 0.35
