@@ -2,6 +2,7 @@
 
 import argparse
 from dataclasses import asdict
+from functools import partial
 import math
 from pathlib import Path
 
@@ -97,13 +98,15 @@ def main(argv=None):
     parser.add_argument("--gif", action="store_true", help="离屏导出 IR-SIM GIF")
     parser.add_argument("--snapshot", action="store_true", help="导出拾取阶段的 IR-SIM 截图")
     parser.add_argument("--html", action="store_true", help="额外导出 HTML 回放")
+    parser.add_argument("--deferred-bearings", action="store_true", help="启用二级方位线索复测")
     args = parser.parse_args(argv)
     try:
         cases = load_config(args.config)["custom"]["directional"]["cases"]
         if args.case not in cases and args.case != "all":
             parser.error(f"未知场景 {args.case}，可选 {', '.join(cases)}")
         for name in cases if args.case == "all" else (args.case,):
-            record = run_case(name, args.seed, args.config)
+            policy = partial(CoveragePolicy, use_deferred_bearings=args.deferred_bearings)
+            record = run_case(name, args.seed, args.config, policy=policy)
             output = args.output / f"{name}.json"
             write_json(output, record)
             print(f"{name}: {record['stop_reason']} · picked {len(record['collected'])} · {output}", flush=True)

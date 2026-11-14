@@ -1,5 +1,6 @@
 import math
 import unittest
+from functools import partial
 
 from route_plan_planner.api import PlanningRequest, plan
 from route_plan_planner.directional import run_case
@@ -91,7 +92,7 @@ class DirectionalTest(unittest.TestCase):
             "targets": [[1.6, 2.1], [2.45, 3.1]],
         }
         sim = DirectionalScene(config, "changing-ids", 42, planner_request=PlanningRequest.from_scene)
-        policy = CoveragePolicy(sim, None)
+        policy = CoveragePolicy(sim, None, use_deferred_bearings=True)
         first, second = policy.capture(), policy.capture()
         self.assertEqual([d["quality"] for d in first["detections"]], ["precise", "bearing"])
         self.assertTrue({d["id"] for d in first["detections"]}.isdisjoint(d["id"] for d in second["detections"]))
@@ -104,6 +105,24 @@ class DirectionalTest(unittest.TestCase):
         third = policy.capture()
         self.assertEqual(third["known"][0]["id"], first["known"][0]["id"])
         self.assertEqual(third["known"][1]["origin_xy_m"], sim.pose[:2])
+        self.assertEqual([item["id"] for item in third["deferred"]], [second["detections"][1]["id"]])
+
+    def test_deferred_bearings_trigger_fresh_observation_before_scan(self):
+        baseline = run_case("random-40-interior", seed=42)
+        record = run_case("random-40-interior", seed=42,
+                          policy=partial(CoveragePolicy, use_deferred_bearings=True))
+        probe = next(a for a in record["approaches"] if a.get("source") == "deferred_bearing")
+        before, after = (record["observations"][probe[key]] for key in ("frame_index", "observation_index"))
+        self.assertEqual(before["pose"][:2], after["pose"][:2])
+        self.assertTrue(any(item["origin_xy_m"] == probe["origin_xy_m"]
+                            and item["bearing_map_rad"] == probe["bearing_map_rad"] for item in before["deferred"]))
+        self.assertTrue(after["detections"])
+        self.assertFalse(any(f["deferred"] for f in baseline["observations"]))
+        for key in (24, 37):
+            times = [next(r["trace"][stop["trace_index"]]["time_s"] for action in r["actions"]
+                          for stop in action.get("pickups", ()) if key in stop["ids"]) for r in (record, baseline)]
+            self.assertLess(*times)
+        self.assertEqual(record["stop_reason"], "all_collected")
 
     def test_replays_full_pickup_and_rejects_unsafe_plans(self):
         records = {name: run_case(name, seed=42) for name in

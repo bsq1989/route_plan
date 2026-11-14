@@ -150,6 +150,8 @@ uv run --project planner python -m route_plan_planner.directional --case two-clu
 
 检测 ID 每帧更新，局部批次按坐标生成当次请求 ID。只有精测帧给出的 `map` 坐标进入位置记忆，确认拾取才移除。原地复测替换当帧视野里的方位线索，平移后从新车位建立线索。仿真在最后一件确认拾取后结束回合。
 
+试验模式 `--deferred-bearings` 会把退出当前选向的方位线索放进二级缓存，最多保留 96 条和 30 秒。当前观测无法继续时，优先从附近旧射线选一个尚未覆盖的方向补测，再进入原地扫视。每个停车位最多主动补测一次。历史射线只触发转向，随后根据精测或新射线与旧射线的近处交会决定是否继续该方向。没有得到支持时转回原朝向。Python API 通过 `CoveragePolicy(..., use_deferred_bearings=True)` 开启。回放日志的 `observations[].deferred` 记录二级缓存，`approaches` 中 `source="deferred_bearing"` 记录补测与新观测帧。
+
 ## 给后续算法的接口
 
 几何规则在 `scene.py`，导入时不创建窗口，也不加载 IR-SIM：

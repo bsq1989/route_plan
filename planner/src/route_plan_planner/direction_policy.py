@@ -13,6 +13,9 @@ MAX_SIDE_PROBE_TURN = math.radians(12)
 NEAR_OBSERVATION_REACH = 2 * BEARING_STEP_M
 BEARING_HISTORY_STOPS = 4
 MIN_BEARING_CROSSING_SINE = math.sin(math.radians(4))
+DEFERRED_BEARING_LIMIT = 96
+DEFERRED_BEARING_LIFETIME_S = 30.
+DEFERRED_RECHECK_DISTANCE = NEAR_OBSERVATION_REACH
 
 
 def same_position(a, b):
@@ -132,8 +135,9 @@ def intersect_bearings(first, second, precision_range, view_range):
 
 
 class CoveragePolicy:
-    def __init__(self, sim, plan):
+    def __init__(self, sim, plan, *, use_deferred_bearings=False):
         self.sim, self.plan = sim, plan
+        self.use_deferred_bearings = use_deferred_bearings
         self.memory = {}
         self.decisions, self.approaches, self.plans = [], [], []
         self.sweep_origin = None
@@ -144,16 +148,24 @@ class CoveragePolicy:
         self.recent_bearings = []
         self.observation_origin = None
         self.observation_attempts = set()
+        self.deferred_bearings = {}
+        self.deferred_probe_pose = None
+        self.deferred_misses = set()
+        self.latest_frame = None
 
     def capture(self):
         frame = self.sim.capture()
         x, y, heading = frame["pose"]
         half_view = math.radians(frame["view_angle_deg"] / 2)
+        bearings = [item for item in frame["detections"] if item["quality"] == "bearing"]
+        current_keys = {self.bearing_key(ray) for ray in bearings}
         for key, item in list(self.memory.items()):
             if item["quality"] == "bearing" and (
                 item["origin_xy_m"] != (x, y)
                 or abs(normalize(item["bearing_map_rad"] - heading)) <= half_view + EPS
             ):
+                if self.bearing_key(item) not in current_keys:
+                    self.defer_bearing(item)
                 del self.memory[key]
         available = {key for key, item in self.memory.items() if item["quality"] == "precise"}
         for item in frame["detections"]:
@@ -166,7 +178,14 @@ class CoveragePolicy:
                     self.next_point_id -= 1
                 available.discard(key)
             self.memory[key] = {**item, "id": key}
-        bearings = [item for item in frame["detections"] if item["quality"] == "bearing"]
+            if item["quality"] == "bearing":
+                self.memory[key]["observed_s"] = frame["time_s"]
+        for key in current_keys:
+            self.deferred_bearings.pop(key, None)
+            self.deferred_misses.discard(key)
+        self.deferred_bearings = {key: item for key, item in self.deferred_bearings.items()
+                                  if frame["time_s"] - item["observed_s"] <= DEFERRED_BEARING_LIFETIME_S}
+        self.deferred_misses.intersection_update(self.deferred_bearings)
         if bearings:
             if self.recent_bearings and self.recent_bearings[-1][0] == (x, y):
                 rays = {item["bearing_map_rad"]: item for item in self.recent_bearings[-1][1]}
@@ -176,13 +195,28 @@ class CoveragePolicy:
                 self.recent_bearings.append(((x, y), bearings))
                 self.recent_bearings = self.recent_bearings[-BEARING_HISTORY_STOPS:]
         frame["known"] = list(self.memory.values())
-        self.sim.record_known(frame["index"], frame["known"])
+        frame["deferred"] = list(self.deferred_bearings.values())
+        self.sim.record_known(frame["index"], frame["known"], deferred=frame["deferred"])
+        self.latest_frame = frame
         if frame["pose"][:2] != self.sweep_origin:
             self.sweep_origin = frame["pose"][:2]
             self.seen_headings.clear()
         if heading not in self.seen_headings:
             self.seen_headings.append(heading)
         return frame
+
+    @staticmethod
+    def bearing_key(item):
+        return item["origin_xy_m"], item["bearing_map_rad"]
+
+    def defer_bearing(self, item):
+        if not self.use_deferred_bearings:
+            return
+        key = self.bearing_key(item)
+        self.deferred_bearings[key] = item
+        if len(self.deferred_bearings) > DEFERRED_BEARING_LIMIT:
+            oldest = min(self.deferred_bearings, key=lambda key: self.deferred_bearings[key]["observed_s"])
+            del self.deferred_bearings[oldest]
 
     def approach(self, hint, frame):
         sim, p = self.sim, self.sim.regions
@@ -265,6 +299,70 @@ class CoveragePolicy:
         radius = sim.regions.precision_range_m
         return [item["xy_m"] for item in self.memory.values()
                 if item["quality"] == "precise" and math.dist(sim.pose[:2], item["xy_m"]) <= radius + EPS]
+
+    def recheck_deferred(self):
+        """Look toward old rays from this pose, and let fresh detections drive any move."""
+        sim, p = self.sim, self.sim.regions
+        pose = sim.pose
+        if not self.deferred_bearings or self.deferred_probe_pose == pose[:2]:
+            return None
+        radius = p.precision_range_m + DEFERRED_RECHECK_DISTANCE
+        half_view = math.radians(p.view_angle_deg / 2)
+        width = 2 * half_view
+        active = [item["bearing_map_rad"] for item in self.memory.values() if item["quality"] == "bearing"]
+        options = []
+        for key, item in self.deferred_bearings.items():
+            origin, bearing = key
+            if origin == pose[:2] or key in self.deferred_misses:
+                continue
+            c, s = math.cos(bearing), math.sin(bearing)
+            dx, dy = pose[0] - origin[0], pose[1] - origin[1]
+            along, across = dx * c + dy * s, dy * c - dx * s
+            if abs(across) >= radius:
+                continue
+            reach = math.sqrt(radius**2 - across**2)
+            start, end = max(p.precision_range_m, along - reach), min(p.view_range_m, along + reach)
+            if end <= start + EPS:
+                continue
+            distance_along = (start + end) / 2
+            point = origin[0] + distance_along * c, origin[1] + distance_along * s
+            distance, turn = relative(pose, point)
+            yaw = normalize(pose[2] + turn)
+            if abs(turn) <= MIN_TURN + EPS:
+                continue
+            if new_view_angle(yaw, self.seen_headings, width) <= MIN_TURN:
+                continue
+            if any(abs(normalize(yaw - angle)) <= half_view / 2 for angle in active):
+                continue
+            cost = TRAVEL_COST_WEIGHT * max(0., distance - p.precision_range_m) / p.precision_range_m
+            cost += TURN_COST_WEIGHT * abs(turn) / math.pi
+            options.append((cost, -item["observed_s"], yaw, key))
+        if not options:
+            return None
+        cost, _, yaw, key = min(options)
+        self.deferred_probe_pose = pose[:2]
+        action = sim.turn(yaw)
+        entry = {"frame_index": self.latest_frame["index"], "pose": pose, "source": "deferred_bearing",
+                 "yaw_rad": yaw, "cost": cost, "origin_xy_m": key[0], "bearing_map_rad": key[1],
+                 "reason": action["reason"]}
+        self.approaches.append(entry)
+        if action["status"] != "success":
+            return None
+        frame = self.capture()
+        entry["observation_index"] = frame["index"]
+        ray = self.deferred_bearings.get(key)
+        confirmed = ray is not None and any(
+            (point := intersect_bearings(ray, item, p.precision_range_m, p.view_range_m)) is not None
+            and math.dist(pose[:2], point) <= radius + EPS
+            for item in frame["detections"] if item["quality"] == "bearing"
+        )
+        entry["confirmed"] = confirmed or bool(self.local_points())
+        if not entry["confirmed"]:
+            self.deferred_misses.add(key)
+            if sim.turn(pose[2])["status"] == "success":
+                self.capture()
+                return None
+        return frame
 
     def observe_nearby_bearings(self, frame):
         """Use recent crossings to choose one short observation move."""
@@ -353,10 +451,16 @@ class CoveragePolicy:
                             for point in picked)]
                     for key, hint in list(self.memory.items()):
                         if hint["quality"] == "bearing":
+                            self.defer_bearing(hint)
                             del self.memory[key]
                         elif (xy := next((xy for xy in picked if same_position(hint["xy_m"], xy)), None)) is not None:
                             del self.memory[key]
                             picked.remove(xy)
+                    for key in list(self.deferred_bearings):
+                        origin, bearing = key
+                        if any(distance > sim.regions.precision_range_m and abs(offset) <= MIN_TURN + EPS
+                               for distance, offset in (relative((*origin, bearing), (p["x"], p["y"])) for p in batch)):
+                            del self.deferred_bearings[key]
                     # Removing a target may reveal an occluded target from
                     # the same position.
                     self.seen_headings.clear()
@@ -420,6 +524,12 @@ class CoveragePolicy:
         width = math.radians(sim.regions.view_angle_deg)
         sectors = math.ceil(360 / sim.regions.view_angle_deg)
         options = {normalize(sim.pose[2] + i * math.tau / sectors) for i in range(sectors)}
+        start_xy = sim.pose[:2]
+        frame = self.recheck_deferred()
+        if frame is not None:
+            yield frame
+            if sim.pose[:2] != start_xy:
+                return
         tried = set()
         while True:
             x, y, heading = sim.pose

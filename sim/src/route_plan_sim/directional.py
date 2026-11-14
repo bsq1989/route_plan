@@ -132,8 +132,9 @@ class DirectionalScene:
         self.observations.append(deepcopy(frame))
         return frame
 
-    def record_known(self, index, detections):
+    def record_known(self, index, detections, *, deferred=()):
         self.observations[index]["known"] = [dict(item) for item in detections]
+        self.observations[index]["deferred"] = [dict(item) for item in deferred]
 
     def _occluded(self, distance, yaw, blockers):
         x, y = self.pose[:2]
