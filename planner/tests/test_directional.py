@@ -2,9 +2,9 @@ import math
 import unittest
 from functools import partial
 
-from route_plan_planner.api import PlanningRequest, plan
-from route_plan_planner.directional import run_case
-from route_plan_planner.direction_policy import CoveragePolicy, approach_distance, intersect_bearings, new_view_angle, ranked_headings
+from route_plan_planner.api import PlanningRequest
+from route_plan_planner.directional import run_case, simulate_action
+from route_plan_planner.direction_policy import CoverageConfig, CoveragePolicy, approach_distance, intersect_bearings, new_view_angle, ranked_headings
 from route_plan_sim.directional import DirectionalScene, load_config
 
 
@@ -88,24 +88,80 @@ class DirectionalTest(unittest.TestCase):
 
     def test_observation_memory_survives_detection_id_changes(self):
         config = load_config()
-        config["custom"]["directional"]["cases"]["changing-ids"] = {
-            "targets": [[1.6, 2.1], [2.45, 3.1]],
-        }
+        config["custom"]["directional"]["cases"]["changing-ids"] = {"targets": [[2.45, 3.1]]}
         sim = DirectionalScene(config, "changing-ids", 42, planner_request=PlanningRequest.from_scene)
-        policy = CoveragePolicy(sim, None, use_deferred_bearings=True)
-        first, second = policy.capture(), policy.capture()
-        self.assertEqual([d["quality"] for d in first["detections"]], ["precise", "bearing"])
-        self.assertTrue({d["id"] for d in first["detections"]}.isdisjoint(d["id"] for d in second["detections"]))
-        self.assertEqual(first["known"][0]["id"], second["known"][0]["id"])
-        self.assertEqual(len(second["known"]), 2)
-        self.assertEqual(second["known"][1]["id"], second["detections"][1]["id"])
-        stale = sim.execute_pickups([], [], [first["detections"][0]["id"]], frame_index=first["index"])
-        self.assertEqual(stale["reason"], "stale_or_invalid_detection")
-        self.assertEqual(sim.forward(.25)["status"], "success")
-        third = policy.capture()
-        self.assertEqual(third["known"][0]["id"], first["known"][0]["id"])
-        self.assertEqual(third["known"][1]["origin_xy_m"], sim.pose[:2])
-        self.assertEqual([item["id"] for item in third["deferred"]], [second["detections"][1]["id"]])
+        policy = CoveragePolicy(use_deferred_bearings=True)
+        observe = policy.next_action()
+        first = sim.capture()
+        policy.submit_result(observe.action_id, status="success", pose=sim.pose, time_s=sim.time,
+                             observation={**first, "observation_id": 0})
+        action = policy.next_action()
+        self.assertEqual(action.kind, "turn")
+        simulate_action(policy, sim, action)
+        observe = policy.next_action()
+        self.assertEqual(observe.kind, "observe")
+        previous = policy.latest_frame["detections"][0]
+        simulate_action(policy, sim, observe)
+        action = policy.next_action()
+        self.assertEqual(action.kind, "forward")
+        refreshed = policy.latest_frame["detections"][0]
+        self.assertNotEqual(previous["id"], refreshed["id"])
+        simulate_action(policy, sim, action)
+        simulate_action(policy, sim, policy.next_action())
+        self.assertIn(refreshed["id"], {item["id"] for item in policy.latest_frame["deferred"]})
+
+    def test_gateway_waits_for_matching_fresh_feedback(self):
+        policy = CoveragePolicy()
+        pose = (0., 0., 0.)
+        observe = policy.next_action()
+        self.assertIs(observe, policy.next_action())
+        observation = {"observation_id": "frame-1", "detections": [{
+            "quality": "bearing", "origin_xy_m": [.1, 0.], "bearing_map_rad": 0.,
+        }]}
+        self.assertTrue(policy.submit_result(observe.action_id, status="success", pose=pose,
+                                             time_s=1., observation=observation))
+        motion = policy.next_action()
+        self.assertEqual(motion.kind, "forward")
+        self.assertFalse(policy.submit_result(observe.action_id, status="success", pose=pose, time_s=1.))
+        self.assertIs(motion, policy.next_action())
+        actual = (.20, 0., 0.)
+        self.assertTrue(policy.submit_result(motion.action_id, status="blocked", pose=actual, time_s=2.))
+        observe = policy.next_action()
+        self.assertEqual(observe.kind, "observe")
+        self.assertEqual(observe.start_pose, actual)
+        with self.assertRaisesRegex(ValueError, "previous result"):
+            policy.submit_result(observe.action_id, status="success", pose=actual, time_s=3.,
+                                 observation={**observation, "observation_id": "frame-2", "time_s": 1.5})
+        self.assertIs(observe, policy.next_action())
+        policy.submit_result(observe.action_id, status="cancelled", pose=actual, time_s=3.)
+        self.assertIsNone(policy.next_action())
+        self.assertEqual(policy.stop_reason, "cancelled")
+
+    def test_partial_gateway_pickup_preserves_unconfirmed_target(self):
+        policy = CoveragePolicy()
+        first, second = (1.0, 0.), (1.2, .25)
+        observe = policy.next_action()
+        policy.submit_result(observe.action_id, status="success", pose=[0, 0, 0], time_s=1.,
+                             observation={"observation_id": 1, "detections": [
+                                 {"quality": "precise", "xy_m": point} for point in (first, second)
+                             ]})
+        action = policy.next_action()
+        self.assertEqual(action.kind, "pickup")
+        targets = {(target.x, target.y): target.id for target in action.targets}
+        self.assertEqual(set(targets), {first, second})
+        with self.assertRaisesRegex(ValueError, "all requested IDs"):
+            policy.submit_result(action.action_id, status="success", pose=action.start_pose,
+                                 time_s=2., picked_ids=[targets[first]])
+        policy.submit_result(action.action_id, status="partial", pose=action.goals[0],
+                             time_s=2., picked_ids=[targets[first]])
+        observe = policy.next_action()
+        self.assertEqual(observe.kind, "observe")
+        self.assertEqual(policy.local_points(), [second])
+        policy.submit_result(observe.action_id, status="success", pose=action.goals[0], time_s=3.,
+                             observation={"observation_id": 2, "detections": []})
+        retry = policy.next_action()
+        self.assertEqual(retry.kind, "pickup")
+        self.assertEqual([(target.x, target.y) for target in retry.targets], [second])
 
     def test_deferred_bearings_trigger_fresh_observation_before_scan(self):
         baseline = run_case("random-40-interior", seed=42)
@@ -165,18 +221,18 @@ class DirectionalTest(unittest.TestCase):
             "targets": [[9.609, 6.244], [9.624, 6.522], [10.046, 6.929]],
         }
         sim = DirectionalScene(config, "right-cluster", 42, planner_request=PlanningRequest.from_scene)
-        policy = CoveragePolicy(sim, plan)
-        first = policy.capture()
-        closest = first["detections"][0]["xy_m"]
+        policy = CoveragePolicy(request_options=sim.request([]).to_dict())
+        first = policy.next_action()
+        frame = sim.capture()
+        closest = frame["detections"][0]["xy_m"]
         self.assertFalse(sim.regions.eligible(sim.pose, closest))
-        self.assertEqual(sim.turn(0.)["status"], "success")
-        frame = policy.capture()
-        self.assertFalse(frame["detections"])
-        self.assertEqual(policy.evaluate(frame, set()), (True, "success"))
-        self.assertEqual(set(sim.final_state()["collected"]), {1, 2})
-        self.assertFalse(policy.local_points())
-        frame = policy.capture()
-        self.assertEqual(policy.evaluate(frame, set()), (True, "success"))
+        policy.submit_result(first.action_id, status="success", pose=sim.pose, time_s=sim.time,
+                             observation={**frame, "observation_id": frame["index"]})
+        action = policy.next_action()
+        self.assertEqual(action.kind, "pickup")
+        self.assertEqual({(t.x, t.y) for t in action.targets}, {tuple(xy) for xy in config["custom"]["directional"]["cases"]["right-cluster"]["targets"][:2]})
+        while not sim.all_collected and (action := policy.next_action()) is not None:
+            simulate_action(policy, sim, action)
         self.assertTrue(sim.all_collected)
 
     def test_bearing_only_approach_remeasures_and_checks_hidden_obstacle(self):
@@ -189,17 +245,22 @@ class DirectionalTest(unittest.TestCase):
         for name in ("distant", "distant-blocked"):
             with self.subTest(name=name):
                 sim = DirectionalScene(config, name, 42, planner_request=PlanningRequest.from_scene)
-                policy = CoveragePolicy(sim, None)
-                frame = policy.capture()
-                hint = next(item for item in frame["detections"] if item["id"] == 1)
+                policy = CoveragePolicy(CoverageConfig(view_angle_deg=sim.regions.view_angle_deg),
+                                        request_options=sim.request([]).to_dict())
+                simulate_action(policy, sim, policy.next_action())
+                hint, = policy.latest_frame["detections"]
                 self.assertEqual(hint, {"id": 1, "quality": "bearing", "origin_xy_m": (.8, 2.1),
                                         "bearing_map_rad": 0.})
                 start = sim.pose
-                self.assertEqual(policy.pickup(frame), (False, "no_precise_batch"))
-                updated = policy.approach(hint, frame)
-                self.assertEqual(policy.approaches[0]["source"], "bearing")
-                self.assertTrue(all(item["commanded_m"] <= .40 for item in policy.approaches))
+                action = policy.next_action()
+                self.assertEqual(action.kind, "forward")
+                self.assertLessEqual(action.distance_m, .40)
+                simulate_action(policy, sim, action)
                 if name == "distant":
+                    while (action := policy.next_action()) is not None and action.kind != "pickup":
+                        simulate_action(policy, sim, action)
+                    self.assertIsNotNone(action)
+                    updated = policy.latest_frame
                     self.assertNotEqual(updated["detections"][0]["id"], hint["id"])
                     self.assertEqual(updated["detections"][0]["quality"], "precise")
                     self.assertEqual(updated["detections"][0]["xy_m"], (5.2, 2.1))

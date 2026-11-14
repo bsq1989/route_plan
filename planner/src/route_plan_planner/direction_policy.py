@@ -1,9 +1,15 @@
-"""Replaceable example policy using only stopped observations and action feedback."""
+"""Directional pickup strategy driven by stopped observations and action feedback."""
 
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass
 import math
+from uuid import uuid4
 
-from route_plan_sim.directional import MIN_DISTANCE, MIN_TURN, relative
 from route_plan_sim.scene import EPS, normalize
+
+from .api import PickupStop, PlanningRequest, Target, plan
+from .motion import MIN_ROTATION as MIN_TURN, MIN_TRANSLATION as MIN_DISTANCE, Pose
 
 
 BEARING_STEP_M = .40
@@ -18,8 +24,55 @@ DEFERRED_BEARING_LIFETIME_S = 30.
 DEFERRED_RECHECK_DISTANCE = NEAR_OBSERVATION_REACH
 
 
-def same_position(a, b):
-    return math.dist(a, b) <= EPS
+def relative(pose, point):
+    dx, dy = point[0] - pose[0], point[1] - pose[1]
+    return math.hypot(dx, dy), normalize(math.atan2(dy, dx) - pose[2])
+
+
+@dataclass(frozen=True)
+class CoverageConfig:
+    view_range_m: float = 5.
+    view_angle_deg: float = 90.
+    pickup_inner_radius_m: float = .75
+    pickup_angle_deg: float = 60.
+    approach_tolerance_m: float = .05
+    precision_range_m: float = 1.4
+    auto_fence_radius_m: float = 1.4
+    maximum_rounds: int = 80
+    position_match_tolerance_m: float = EPS
+    probe_initial_heading: bool = False
+
+    def __post_init__(self):
+        distances = (self.view_range_m, self.pickup_inner_radius_m, self.precision_range_m, self.auto_fence_radius_m)
+        if any(not math.isfinite(value) or value <= 0 for value in distances):
+            raise ValueError("Coverage distances must be finite and positive")
+        if not (0 < self.view_angle_deg <= 360 and 0 < self.pickup_angle_deg <= 360
+                and 0 <= self.approach_tolerance_m < math.inf
+                and 0 <= self.position_match_tolerance_m < math.inf):
+            raise ValueError("Invalid coverage angles or approach tolerance")
+        if type(self.maximum_rounds) is not int or self.maximum_rounds < 1:
+            raise ValueError("maximum_rounds must be a positive integer")
+
+
+@dataclass(frozen=True)
+class CoverageAction:
+    action_id: str
+    kind: str
+    frame_id: str
+    start_pose: Pose | None
+    goals: tuple[Pose, ...] = ()
+    pickup_stops: tuple[PickupStop, ...] = ()
+    targets: tuple[Target, ...] = ()
+    distance_m: float | None = None
+    auto_fence_radius_m: float | None = None
+
+
+class _RefreshObservation(Exception):
+    """The actual robot pose changed during a failed action."""
+
+
+class _StopCoverage(Exception):
+    """The session should return control to the caller."""
 
 
 def new_view_angle(yaw, seen, width):
@@ -135,8 +188,22 @@ def intersect_bearings(first, second, precision_range, view_range):
 
 
 class CoveragePolicy:
-    def __init__(self, sim, plan, *, use_deferred_bearings=False):
-        self.sim, self.plan = sim, plan
+    """Keep one strategy instance per robot task. Call serially from the event loop."""
+
+    def __init__(self, config=None, *, request_options=None, planner=plan, use_deferred_bearings=False):
+        self.config = config if config is not None else CoverageConfig()
+        self.request_options = deepcopy(dict(request_options or {}))
+        self.frame_id = self.request_options.get("frame_id", "map")
+        self.plan = planner
+        self.pose = None
+        self.stop_reason = None
+        self.pending_action = None
+        self._session_id = uuid4().hex
+        self._action_number = 0
+        self._result_time = 0.
+        self._next_detection_id = 1
+        self._run = self._run_policy()
+        self._observation_ids = set()
         self.use_deferred_bearings = use_deferred_bearings
         self.memory = {}
         self.decisions, self.approaches, self.plans = [], [], []
@@ -153,15 +220,138 @@ class CoveragePolicy:
         self.deferred_misses = set()
         self.latest_frame = None
 
-    def capture(self):
-        frame = self.sim.capture()
+    def next_action(self) -> CoverageAction | None:
+        """Return the outstanding action or the first action. None means stopped."""
+        if self.pending_action is None and self.stop_reason is None:
+            self._advance(None)
+        return self.pending_action
+
+    def submit_result(self, action_id, *, status, pose, time_s, observation=None, picked_ids=(), reason=None) -> bool:
+        """Advance on a matching, settled result. Ignore late or duplicate action IDs."""
+        action = self.pending_action
+        if action is None or action.action_id != action_id:
+            return False
+        if status not in ("success", "blocked", "failed", "partial", "timeout", "cancelled"):
+            raise ValueError("Unknown action status")
+        if status == "partial" and action.kind != "pickup":
+            raise ValueError("Only a pickup batch can be partially successful")
+        measured = self._coordinates(pose, 3, "pose")
+        if type(time_s) not in (int, float) or not math.isfinite(time_s) or time_s < self._result_time:
+            raise ValueError("Feedback time must be finite and nondecreasing")
+        picked = tuple(picked_ids)
+        allowed = {target for stop in action.pickup_stops for target in stop.target_ids}
+        if (any(type(key) is not int or key not in allowed for key in picked)
+                or len(set(picked)) != len(picked)):
+            raise ValueError("picked_ids must be unique request IDs from the pickup action")
+        if action.kind == "pickup" and status == "success" and set(picked) != allowed:
+            raise ValueError("A successful pickup must confirm all requested IDs")
+        if status == "partial" and (not picked or set(picked) == allowed):
+            raise ValueError("A partial pickup must confirm only the successful subset")
+        frame = None
+        if action.kind == "observe" and status == "success":
+            frame = self._observation(observation, measured, time_s)
+        elif observation is not None:
+            raise ValueError("An observation is accepted only for a successful observe action")
+        self.pose = measured
+        self._result_time = time_s
+        self._advance({"status": status, "reason": reason, "frame": frame, "picked_ids": picked})
+        return True
+
+    @staticmethod
+    def _coordinates(values, size, name):
+        if not isinstance(values, (tuple, list)) or len(values) != size or any(
+            type(value) not in (int, float) or not math.isfinite(value) for value in values
+        ):
+            raise ValueError(f"{name} must contain {size} finite numbers")
+        return tuple(values)
+
+    def _observation(self, observation, pose, time_s):
+        if not isinstance(observation, Mapping):
+            raise ValueError("An observe result requires an observation")
+        frame_id = observation.get("frame_id", self.frame_id)
+        observation_id = observation.get("observation_id")
+        if frame_id != self.frame_id:
+            raise ValueError("Observation frame_id differs from the strategy frame")
+        if (type(observation_id) not in (int, str) or observation_id == ""
+                or observation_id in self._observation_ids):
+            raise ValueError("observation_id must be unique for this task")
+        captured_at = observation.get("time_s", time_s)
+        if (type(captured_at) not in (int, float) or not math.isfinite(captured_at)
+                or not self._result_time <= captured_at <= time_s):
+            raise ValueError("Observation must have been captured after the previous result")
+        observations = observation.get("detections")
+        if not isinstance(observations, (list, tuple)):
+            raise ValueError("detections must be a list")
+        detections = []
+        for item in observations:
+            if not isinstance(item, Mapping):
+                raise ValueError("Each detection must be a mapping")
+            quality = item.get("quality")
+            detection = {"id": self._next_detection_id + len(detections), "quality": quality}
+            if quality == "precise":
+                detection["xy_m"] = self._coordinates(item.get("xy_m"), 2, "xy_m")
+                if math.dist(pose[:2], detection["xy_m"]) > self.config.precision_range_m + EPS:
+                    raise ValueError("A precise detection must be within precision_range_m")
+            elif quality == "bearing":
+                detection["origin_xy_m"] = self._coordinates(item.get("origin_xy_m"), 2, "origin_xy_m")
+                bearing, = self._coordinates([item.get("bearing_map_rad")], 1, "bearing_map_rad")
+                detection["bearing_map_rad"] = bearing
+            else:
+                raise ValueError("Detection quality must be precise or bearing")
+            detections.append(detection)
+        index = len(self._observation_ids)
+        self._observation_ids.add(observation_id)
+        self._next_detection_id += len(detections)
+        return {"index": index, "observation_id": observation_id, "time_s": captured_at, "pose": pose,
+                "frame_id": frame_id, "view_range_m": self.config.view_range_m,
+                "view_angle_deg": self.config.view_angle_deg, "detections": detections}
+
+    def _advance(self, feedback):
+        self.pending_action = None
+        try:
+            self.pending_action = next(self._run) if feedback is None else self._run.send(feedback)
+        except StopIteration as stopped:
+            self.stop_reason = stopped.value
+        except _StopCoverage as stopped:
+            self.stop_reason = str(stopped)
+
+    def _action(self, kind, **options):
+        self._action_number += 1
+        return (yield CoverageAction(f"{self._session_id}:{self._action_number}", kind, self.frame_id,
+                                     self.pose, **options))
+
+    def _motion(self, kind, goal, **options):
+        before = self.pose
+        result = yield from self._action(kind, goals=(goal,), **options)
+        if result["status"] in ("timeout", "cancelled"):
+            raise _StopCoverage(result["status"])
+        if result["status"] != "success" and self.pose != before:
+            raise _RefreshObservation
+        return result
+
+    def _turn(self, yaw):
+        return (yield from self._motion("turn", (*self.pose[:2], yaw)))
+
+    def _forward(self, distance):
+        x, y, yaw = self.pose
+        goal = x + distance * math.cos(yaw), y + distance * math.sin(yaw), yaw
+        return (yield from self._motion("forward", goal, distance_m=distance))
+
+    def _same_position(self, left, right):
+        return math.dist(left, right) <= self.config.position_match_tolerance_m
+
+    def _capture(self):
+        result = yield from self._action("observe")
+        if result["status"] != "success":
+            raise _StopCoverage(result["status"])
+        frame = result["frame"]
         x, y, heading = frame["pose"]
         half_view = math.radians(frame["view_angle_deg"] / 2)
         bearings = [item for item in frame["detections"] if item["quality"] == "bearing"]
         current_keys = {self.bearing_key(ray) for ray in bearings}
         for key, item in list(self.memory.items()):
             if item["quality"] == "bearing" and (
-                item["origin_xy_m"] != (x, y)
+                item["station_xy_m"] != (x, y)
                 or abs(normalize(item["bearing_map_rad"] - heading)) <= half_view + EPS
             ):
                 if self.bearing_key(item) not in current_keys:
@@ -171,8 +361,11 @@ class CoveragePolicy:
         for item in frame["detections"]:
             key = item["id"]
             if item["quality"] == "precise":
-                key = next((key for key in self.memory if key in available
-                            and same_position(self.memory[key]["xy_m"], item["xy_m"])), None)
+                key = min(
+                    (key for key in self.memory if key in available
+                     and self._same_position(self.memory[key]["xy_m"], item["xy_m"])),
+                    key=lambda key: math.dist(self.memory[key]["xy_m"], item["xy_m"]), default=None,
+                )
                 if key is None:
                     key = self.next_point_id
                     self.next_point_id -= 1
@@ -180,6 +373,7 @@ class CoveragePolicy:
             self.memory[key] = {**item, "id": key}
             if item["quality"] == "bearing":
                 self.memory[key]["observed_s"] = frame["time_s"]
+                self.memory[key]["station_xy_m"] = (x, y)
         for key in current_keys:
             self.deferred_bearings.pop(key, None)
             self.deferred_misses.discard(key)
@@ -196,7 +390,6 @@ class CoveragePolicy:
                 self.recent_bearings = self.recent_bearings[-BEARING_HISTORY_STOPS:]
         frame["known"] = list(self.memory.values())
         frame["deferred"] = list(self.deferred_bearings.values())
-        self.sim.record_known(frame["index"], frame["known"], deferred=frame["deferred"])
         self.latest_frame = frame
         if frame["pose"][:2] != self.sweep_origin:
             self.sweep_origin = frame["pose"][:2]
@@ -218,26 +411,26 @@ class CoveragePolicy:
             oldest = min(self.deferred_bearings, key=lambda key: self.deferred_bearings[key]["observed_s"])
             del self.deferred_bearings[oldest]
 
-    def approach(self, hint, frame):
-        sim, p = self.sim, self.sim.regions
+    def _approach(self, hint, frame):
+        p = self.config
         reference = hint["id"]
         missed_bearings = []
         for _ in range(20):
             if hint["quality"] == "precise":
                 item = next((item for item in frame["detections"]
-                             if item["quality"] == "precise" and same_position(item["xy_m"], hint["xy_m"])), None)
+                             if item["quality"] == "precise" and self._same_position(item["xy_m"], hint["xy_m"])), None)
             else:
                 item = min((item for item in frame["detections"] if item["quality"] == "bearing"
-                            and abs(normalize(item["bearing_map_rad"] - sim.pose[2])) <= MIN_TURN + EPS),
-                           key=lambda item: abs(normalize(item["bearing_map_rad"] - sim.pose[2])), default=None)
-            entry = {"reference_id": reference, "pose": sim.pose, "frame_index": frame["index"]}
+                            and abs(normalize(item["bearing_map_rad"] - self.pose[2])) <= MIN_TURN + EPS),
+                           key=lambda item: abs(normalize(item["bearing_map_rad"] - self.pose[2])), default=None)
+            entry = {"reference_id": reference, "pose": self.pose, "frame_index": frame["index"]}
             if item is None:
                 distance, reason = None, "reference_not_observed"
             elif item["quality"] == "bearing":
                 entry["source"] = "bearing"
                 distance, reason = BEARING_STEP_M, None
             else:
-                radial, bearing = relative(sim.pose, item["xy_m"])
+                radial, bearing = relative(self.pose, item["xy_m"])
                 distance, reason = approach_distance(radial * math.cos(bearing), radial * math.sin(bearing),
                                                      p.pickup_inner_radius_m, p.approach_tolerance_m)
             entry.update(distance_m=distance, reason=reason)
@@ -245,25 +438,25 @@ class CoveragePolicy:
             if distance is None or distance == 0:
                 return frame
             entry["commanded_m"] = distance
-            action = sim.forward(distance)
+            action = yield from self._forward(distance)
             if action["status"] != "success":
                 entry["reason"] = action["reason"]
                 return frame
-            previous, frame = frame, self.capture()
+            previous, frame = frame, (yield from self._capture())
             if self.local_points():
                 return frame
             if item["quality"] == "bearing":
                 bearings = [item for item in previous["detections"] if item["quality"] == "bearing"]
-                frame, missed_bearings = self.probe_side_bearings(bearings, missed_bearings, frame)
+                frame, missed_bearings = (yield from self._probe_side_bearings(bearings, missed_bearings, frame))
                 if frame["pose"][2] != previous["pose"][2]:
                     return frame
-        self.approaches.append({"reference_id": reference, "reason": "approach_limit", "pose": sim.pose})
+        self.approaches.append({"reference_id": reference, "reason": "approach_limit", "pose": self.pose})
         return frame
 
-    def probe_side_bearings(self, bearings, previous_misses, frame):
+    def _probe_side_bearings(self, bearings, previous_misses, frame):
         # The projected rays choose where to look. Only capture() can produce a
         # measured point for pickup, and turn() checks the entire swept body.
-        p = self.sim.regions
+        p = self.config
         fresh = list(near_bearings_leaving_view(bearings, frame, p.precision_range_m))
         intervals = fresh + list(near_bearings_leaving_view(previous_misses, frame, p.precision_range_m))
         if not intervals:
@@ -280,30 +473,29 @@ class CoveragePolicy:
         offset = min(offsets, key=lambda offset: (abs(offset) / math.pi - sum(
             offset - half_view <= lo <= hi <= offset + half_view for lo, hi, _ in intervals), abs(offset), offset))
         yaw = normalize(heading + offset)
-        action = self.sim.turn(yaw)
+        action = yield from self._turn(yaw)
         self.approaches.append({"pose": frame["pose"], "frame_index": frame["index"], "source": "bearing_leaving_view",
                                 "yaw_rad": yaw, "reason": action["reason"]})
         if action["status"] != "success":
             return frame, missed
-        frame = self.capture()
+        frame = (yield from self._capture())
         if self.local_points():
             if self.resume_heading is None:
                 self.resume_heading = heading
             return frame, []
-        if self.sim.turn(heading)["status"] == "success":
-            frame = self.capture()
+        if (yield from self._turn(heading))["status"] == "success":
+            frame = (yield from self._capture())
         return frame, missed
 
     def local_points(self):
-        sim = self.sim
-        radius = sim.regions.precision_range_m
+        radius = self.config.precision_range_m
         return [item["xy_m"] for item in self.memory.values()
-                if item["quality"] == "precise" and math.dist(sim.pose[:2], item["xy_m"]) <= radius + EPS]
+                if item["quality"] == "precise" and math.dist(self.pose[:2], item["xy_m"]) <= radius + EPS]
 
-    def recheck_deferred(self):
+    def _recheck_deferred(self):
         """Look toward old rays from this pose, and let fresh detections drive any move."""
-        sim, p = self.sim, self.sim.regions
-        pose = sim.pose
+        p = self.config
+        pose = self.pose
         if not self.deferred_bearings or self.deferred_probe_pose == pose[:2]:
             return None
         radius = p.precision_range_m + DEFERRED_RECHECK_DISTANCE
@@ -341,14 +533,14 @@ class CoveragePolicy:
             return None
         cost, _, yaw, key = min(options)
         self.deferred_probe_pose = pose[:2]
-        action = sim.turn(yaw)
+        action = yield from self._turn(yaw)
         entry = {"frame_index": self.latest_frame["index"], "pose": pose, "source": "deferred_bearing",
                  "yaw_rad": yaw, "cost": cost, "origin_xy_m": key[0], "bearing_map_rad": key[1],
                  "reason": action["reason"]}
         self.approaches.append(entry)
         if action["status"] != "success":
             return None
-        frame = self.capture()
+        frame = (yield from self._capture())
         entry["observation_index"] = frame["index"]
         ray = self.deferred_bearings.get(key)
         confirmed = ray is not None and any(
@@ -359,15 +551,15 @@ class CoveragePolicy:
         entry["confirmed"] = confirmed or bool(self.local_points())
         if not entry["confirmed"]:
             self.deferred_misses.add(key)
-            if sim.turn(pose[2])["status"] == "success":
-                self.capture()
+            if (yield from self._turn(pose[2]))["status"] == "success":
+                (yield from self._capture())
                 return None
         return frame
 
-    def observe_nearby_bearings(self, frame):
+    def _observe_nearby_bearings(self, frame):
         """Use recent crossings to choose one short observation move."""
-        sim, p = self.sim, self.sim.regions
-        pose = sim.pose
+        p = self.config
+        pose = self.pose
         if pose[:2] != self.observation_origin:
             self.observation_origin = pose[:2]
             self.observation_attempts.clear()
@@ -399,36 +591,40 @@ class CoveragePolicy:
                  "distance_m": advance, "cost": cost}
         self.approaches.append(entry)
         if abs(normalize(yaw - pose[2])) > MIN_TURN + EPS:
-            action = sim.turn(yaw)
+            action = yield from self._turn(yaw)
             if action["status"] != "success":
                 entry["reason"] = action["reason"]
                 return frame
-            frame = self.capture()
+            frame = (yield from self._capture())
         if not self.local_points() and any(
-            item["quality"] == "bearing" and abs(normalize(item["bearing_map_rad"] - sim.pose[2])) <= MIN_TURN + EPS
+            item["quality"] == "bearing" and abs(normalize(item["bearing_map_rad"] - self.pose[2])) <= MIN_TURN + EPS
             for item in frame["detections"]
         ):
-            action = sim.forward(min(advance, BEARING_STEP_M))
+            action = yield from self._forward(min(advance, BEARING_STEP_M))
             entry["reason"] = action["reason"]
             if action["status"] == "success":
                 entry["commanded_m"] = min(advance, BEARING_STEP_M)
-                frame = self.capture()
+                frame = (yield from self._capture())
         return frame
 
-    def pickup(self, frame):
-        sim = self.sim
+    def _pickup(self, frame):
         points = self.local_points()
         if not points:
             return False, "no_precise_batch"
-        attempt = (sim.pose, tuple(sorted(points)))
+        attempt = (self.pose, tuple(sorted(points)))
         if self.last_pickup_attempt and self.last_pickup_attempt[0] == attempt:
             return self.last_pickup_attempt[1]
         target_positions = dict(enumerate(points, 1))
         batch = [{"id": key, "x": x, "y": y} for key, (x, y) in target_positions.items()]
-        request = sim.request(batch)
-        entry = {"frame_index": frame["index"], "trace_index": len(sim.trace) - 1,
-                 "request": request.to_dict(), "batch_ids": [target["id"] for target in batch]}
+        payload = {"use_ompl": False, "timeout": 2., "auto_fence_radius_m": self.config.auto_fence_radius_m,
+                   **self.request_options,
+                   "pose": self.pose, "targets": batch, "mode": "auto_fence", "method": "stops"}
+        entry = {"frame_index": frame["index"], "request": payload,
+                 "batch_ids": list(target_positions)}
+        progress = False
         try:
+            request = PlanningRequest.from_dict(payload)
+            entry["request"] = request.to_dict()
             response = self.plan(request)
         except ValueError as error:
             entry.update(status="rejected", reason=str(error))
@@ -437,102 +633,142 @@ class CoveragePolicy:
             # Elapsed wall time is kept for diagnostics, independent of simulated time.
             entry.update(status=response.status, reason=response.reason, response=output)
             if response.success:
-                action = sim.execute_pickups(response.goals, output["pickup_stops"], entry["batch_ids"],
-                                             frame_index=frame["index"], target_positions=target_positions)
+                action = yield from self._action(
+                    "pickup", goals=tuple(response.goals), pickup_stops=tuple(response.pickup_stops),
+                    targets=request.targets, auto_fence_radius_m=request.auto_fence_radius_m,
+                )
                 entry.update(status=action["status"], reason=action["reason"])
-                if action["status"] == "success":
+                progress = bool(action["picked_ids"])
+                if progress:
                     # Reobserve the previous search direction from the new pose.
                     if self.resume_heading is None and any(item["quality"] == "bearing" for item in frame["known"]):
                         self.resume_heading = frame["pose"][2]
-                    picked = [(target["x"], target["y"]) for target in batch]
-                    for origin, rays in self.recent_bearings:
+                    picked = [target_positions[key] for key in action["picked_ids"]]
+                    confirmed = tuple(picked)
+                    for _, rays in self.recent_bearings:
                         rays[:] = [ray for ray in rays if not any(
-                            abs(relative((*origin, ray["bearing_map_rad"]), point)[1]) <= MIN_TURN + EPS
+                            abs(relative((*ray["origin_xy_m"], ray["bearing_map_rad"]), point)[1]) <= MIN_TURN + EPS
                             for point in picked)]
                     for key, hint in list(self.memory.items()):
                         if hint["quality"] == "bearing":
                             self.defer_bearing(hint)
                             del self.memory[key]
-                        elif (xy := next((xy for xy in picked if same_position(hint["xy_m"], xy)), None)) is not None:
+                        elif hint["xy_m"] in picked:
                             del self.memory[key]
-                            picked.remove(xy)
+                            picked.remove(hint["xy_m"])
                     for key in list(self.deferred_bearings):
                         origin, bearing = key
-                        if any(distance > sim.regions.precision_range_m and abs(offset) <= MIN_TURN + EPS
-                               for distance, offset in (relative((*origin, bearing), (p["x"], p["y"])) for p in batch)):
+                        if any(distance > self.config.precision_range_m and abs(offset) <= MIN_TURN + EPS
+                               for distance, offset in (relative((*origin, bearing), point) for point in confirmed)):
                             del self.deferred_bearings[key]
                     # Removing a target may reveal an occluded target from
                     # the same position.
                     self.seen_headings.clear()
         self.plans.append(entry)
-        result = entry["status"] == "success", entry["reason"] or entry["status"]
+        result = progress, entry["reason"] or entry["status"]
         self.last_pickup_attempt = attempt, result
+        if entry["status"] in ("timeout", "cancelled"):
+            raise _StopCoverage(entry["status"])
+        if not progress and self.pose != frame["pose"]:
+            raise _RefreshObservation
         return result
 
-    def evaluate(self, frame, tried):
-        sim, p = self.sim, self.sim.regions
-        success, pickup_reason = self.pickup(frame)
+    def _evaluate(self, frame, tried):
+        p = self.config
+        success, pickup_reason = (yield from self._pickup(frame))
         if success:
             return success, pickup_reason
         yaw, self.resume_heading = self.resume_heading, None
         if (yaw is not None and new_view_angle(yaw, self.seen_headings, math.radians(p.view_angle_deg)) > MIN_TURN + EPS
-                and sim.turn(yaw)["status"] == "success"):
-            frame = self.capture()
-            success, pickup_reason = self.pickup(frame)
+                and (yield from self._turn(yaw))["status"] == "success"):
+            frame = (yield from self._capture())
+            success, pickup_reason = (yield from self._pickup(frame))
             if success:
                 return success, pickup_reason
-        frame = self.observe_nearby_bearings(frame)
-        success, pickup_reason = self.pickup(frame)
+        frame = (yield from self._observe_nearby_bearings(frame))
+        success, pickup_reason = (yield from self._pickup(frame))
         if success:
             return success, pickup_reason
         hints = self.memory.copy()
         points = {key: item["xy_m"] for key, item in hints.items() if item["quality"] == "precise"}
         bearings = {key: item["bearing_map_rad"] for key, item in hints.items()
-                    if item["quality"] == "bearing" and item["origin_xy_m"] == sim.pose[:2]}
-        ranked = ranked_headings(sim.pose, points, math.radians(p.pickup_angle_deg), p.pickup_inner_radius_m,
+                    if item["quality"] == "bearing" and item["station_xy_m"] == self.pose[:2]}
+        ranked = ranked_headings(self.pose, points, math.radians(p.pickup_angle_deg), p.pickup_inner_radius_m,
                                  bearings, precision_range=p.precision_range_m)
         decision = {"frame_index": frame["index"], "candidates": ranked, "selected": None, "rejected": [],
                     "rule": "coverage_minus_approach_and_turn_cost"}
         self.decisions.append(decision)
         for candidate in ranked:
-            start_xy = sim.pose[:2]
+            start_xy = self.pose[:2]
             marker = (round(candidate["yaw"], 6), tuple(round(v, 6) for v in start_xy))
             if marker in tried:
                 continue
             tried.add(marker)
             reference = hints[candidate["reference_id"]]
-            if abs(normalize(candidate["yaw"] - sim.pose[2])) > MIN_TURN + EPS:
-                action = sim.turn(candidate["yaw"])
+            if abs(normalize(candidate["yaw"] - self.pose[2])) > MIN_TURN + EPS:
+                action = yield from self._turn(candidate["yaw"])
                 if action["status"] != "success":
                     decision["rejected"].append({"yaw": candidate["yaw"], "reason": action["reason"]})
                     continue
-                frame = self.capture()
+                frame = (yield from self._capture())
             decision["selected"] = candidate
-            success, reason = self.pickup(frame)
+            success, reason = (yield from self._pickup(frame))
             if success:
                 return success, reason
-            frame = self.approach(reference, frame)
-            success, reason = self.pickup(frame)
-            if success or sim.pose[:2] != start_xy:
+            frame = (yield from self._approach(reference, frame))
+            success, reason = (yield from self._pickup(frame))
+            if success or self.pose[:2] != start_xy:
                 return success, reason
             decision["rejected"].append({"yaw": candidate["yaw"], "reason": reason})
         rejected = decision["rejected"]
         return False, rejected[-1]["reason"] if rejected else pickup_reason
 
-    def scan(self):
-        sim = self.sim
-        width = math.radians(sim.regions.view_angle_deg)
-        sectors = math.ceil(360 / sim.regions.view_angle_deg)
-        options = {normalize(sim.pose[2] + i * math.tau / sectors) for i in range(sectors)}
-        start_xy = sim.pose[:2]
-        frame = self.recheck_deferred()
+    def _run_policy(self):
+        frame = yield from self._capture()
+        if self.config.probe_initial_heading and frame["detections"]:
+            try:
+                ok, _ = yield from self._pickup(frame)
+                if not ok:
+                    frame = yield from self._approach(frame["detections"][0], frame)
+                    yield from self._pickup(frame)
+            except _RefreshObservation:
+                pass
+            frame = yield from self._capture()
+        tried, last_failure = set(), None
+        for _ in range(self.config.maximum_rounds):
+            start_xy = self.pose[:2]
+            try:
+                ok, reason = yield from self._evaluate(frame, tried)
+                if not ok and reason != "no_safe_heading":
+                    last_failure = reason
+                if not ok and self.pose[:2] == start_xy:
+                    ok, reason = yield from self._scan(tried)
+                    if not ok and reason != "no_safe_heading":
+                        last_failure = reason
+                if not ok and self.pose[:2] == start_xy:
+                    return (last_failure or "no_safe_heading") if self.memory else "no_observed_targets"
+            except _RefreshObservation:
+                ok = False
+            if ok:
+                tried.clear()
+                last_failure = None
+            frame = yield from self._capture()
+        return "round_limit"
+
+    def _scan(self, tried):
+        width = math.radians(self.config.view_angle_deg)
+        sectors = math.ceil(360 / self.config.view_angle_deg)
+        options = {normalize(self.pose[2] + i * math.tau / sectors) for i in range(sectors)}
+        start_xy = self.pose[:2]
+        frame = (yield from self._recheck_deferred())
+        reason = "no_safe_heading"
         if frame is not None:
-            yield frame
-            if sim.pose[:2] != start_xy:
-                return
-        tried = set()
+            ok, reason = yield from self._evaluate(frame, tried)
+            if ok or self.pose[:2] != start_xy:
+                return ok, reason
+        scanned = set()
         while True:
-            x, y, heading = sim.pose
+            x, y, heading = self.pose
             bearings = []
             for item in self.memory.values():
                 if item["quality"] == "precise":
@@ -541,7 +777,7 @@ class CoveragePolicy:
                 else:
                     bearings.append(item["bearing_map_rad"])
             candidates = []
-            for yaw in (options | set(bearings)) - tried:
+            for yaw in (options | set(bearings)) - scanned:
                 turn = abs(normalize(yaw - heading))
                 if turn <= MIN_TURN + EPS:
                     continue
@@ -550,11 +786,13 @@ class CoveragePolicy:
                     count = sum(abs(normalize(yaw - b)) <= width / 2 + EPS for b in bearings)
                     candidates.append((-count, -round(gain, 9), turn, yaw))
             if not candidates:
-                return
+                return False, reason
             yaw = min(candidates)[-1]
-            tried.add(yaw)
-            if sim.turn(yaw)["status"] == "success":
-                frame = self.capture()
-                yield frame
-                if frame["pose"][:2] != sim.pose[:2]:
-                    return
+            scanned.add(yaw)
+            if (yield from self._turn(yaw))["status"] == "success":
+                frame = (yield from self._capture())
+                ok, latest = yield from self._evaluate(frame, tried)
+                if latest != "no_safe_heading":
+                    reason = latest
+                if ok or self.pose[:2] != start_xy:
+                    return ok, reason

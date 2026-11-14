@@ -1,6 +1,6 @@
 # 纯算法 Python SDK 交付与使用
 
-独立分发包为 `route-plan-sdk 0.2.14`，导入名为 `route_plan_sdk`。输入静态场景、车辆位姿和目标，返回有序位姿与拾取安排。
+独立分发包为 `route-plan-sdk 0.2.15`，导入名为 `route_plan_sdk`。`plan()` 输入静态场景、车辆位姿和目标，返回有序位姿与拾取安排。`CoveragePolicy` 根据停稳观测和实测反馈逐步输出远近拾取动作。
 
 包内只包含算法和规划必需的私有几何校验内核。不包含 IR-SIM、绘图、动画、交互窗口、演示入口或实车控制功能。该内核与仓库内的几何规则同源，在打包时复制到私有命名空间，避免另行维护一套碰撞实现。
 
@@ -10,9 +10,9 @@
 
 | 文件 | 用法 |
 | --- | --- |
-| `route_plan_sdk-0.2.14-py3-none-any.whl` | 在其他工程的 Python 环境中直接安装 |
-| `route_plan_sdk-0.2.14.tar.gz` | 标准源码分发包，可直接 pip 安装 |
-| `route_plan_sdk-0.2.14-source.zip` | 解压后可查看、修改源码，含完整说明与调用示例 |
+| `route_plan_sdk-0.2.15-py3-none-any.whl` | 在其他工程的 Python 环境中直接安装 |
+| `route_plan_sdk-0.2.15.tar.gz` | 标准源码分发包，可直接 pip 安装 |
+| `route_plan_sdk-0.2.15-source.zip` | 解压后可查看、修改源码，含完整说明与调用示例 |
 | `SHA256SUMS` | 核对所交付文件的 SHA-256 |
 
 无需安装原仓库的 `sim/` 或 `planner/` 包，也无需配置 `PYTHONPATH`。源代码包中包含默认车辆 YAML，默认尺寸直接来自构建时的 `sim/config/robot.yaml`，不在 API 中重复硬编码。
@@ -28,13 +28,13 @@ v0.1.1 热修复通过 69 项仿真测试和 44 项规划器测试。安装后�
 ```bash
 python3.10 -m venv .venv
 source .venv/bin/activate
-python -m pip install /完整路径/route_plan_sdk-0.2.14-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.15-py3-none-any.whl
 
 # 或在源码解压目录执行
 python -m pip install .
 
 # 需要在其他工程中修改本地源码时
-python -m pip install -e /完整路径/route-plan-sdk-0.2.14
+python -m pip install -e /完整路径/route-plan-sdk-0.2.15
 ```
 
 Windows PowerShell 的环境激活命令为 `.venv\Scripts\Activate.ps1`，安装命令相同。具体 OMPL 平台可用性以目标环境实际安装为准。
@@ -69,6 +69,8 @@ else:
 安装后，这些脚本可以复制到任意业务工程运行；它们没有修改 `sys.path`、引用原仓库或加载显示程序。
 
 ## 输入输出协议
+
+远近观测、两级方位缓存与 Gateway 异步反馈使用 `CoveragePolicy.next_action()` 和 `submit_result()`。接入契约见 [SDK 的 Gateway 远近拾取策略](../planner/sdk/README.md#gateway-远近拾取策略) 和 [最小异步示例](../planner/sdk/examples/gateway_coverage.py)。
 
 `PlanningRequest` 接受当前车身中心位姿、目标列表、场地边界、统一目标直径、方法与时限。矩形由 `width / height` 和可选的 `map_offset: [x, y]` 定义，默认左下角为 `(0, 0)`。可选的 `fence` 接收 map 下按顺时针或逆时针排列的有效围栏顶点 `[[x, y], ...]`，单位为米，支持凹多边形且自动闭合。传入后可以省略宽高，输出位姿仍在 map 下。车身安全轮廓与消除器不得在任何运动时刻接触围栏，目标圆也必须完整在围栏内。参见 [围栏示例](../planner/sdk/examples/fence.py)。
 

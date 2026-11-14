@@ -136,7 +136,7 @@ uv run --project planner python -m route_plan_planner.directional --case two-clu
 
 [directional.yaml](src/route_plan_sim/directional.yaml) 可编辑场地、物品、遮挡和发现扇区、清理圆环、精测距离及局部 `auto_fence` 半径。把 `world`、`robot`、`custom.fence_enabled` 和 `custom.fence` 改为所需围栏配置，再设置围栏内的用例位姿和物品即可换场地。默认圆环为 0.75–1.4 m / 60°，精测距离与 `auto_fence` 分别配置，默认均为 1.4 m。
 
-`DirectionalScene` 提供 `pose`、`capture()`、`turn(yaw)`、`forward(metres)` 和 `execute_pickups(goals, stops, allowed_ids)`。动作返回状态、实际首尾位姿及原因。局部计划先在完整场景副本中执行，触碰边界、碰到漏检物品或拾取不符时整次拒绝。示例 `CoveragePolicy` 使用已观测目标连线选方向；可通过 `run_case(..., policy=...)` 替换策略。
+`run_case()` 使用与 Gateway 相同的 `CoveragePolicy.next_action()` 和 `submit_result()` 接口。仿真执行器调用 `DirectionalScene.capture()`、`turn(yaw)`、`forward(metres)` 和 `execute_pickups()`，回传实际位姿和拾取 ID。局部计划先在完整场景副本中执行，触碰边界、碰到漏检物品或拾取不符时整次拒绝。可通过 `run_case(..., policy=...)` 替换策略。
 
 发现扇区默认以车头为中心，半径为 5 m，展开角为 90°。在扇区内且距离 `base_link` 不超过 1.4 m 的无遮挡目标提供精测 `xy_m`。超过精测距离时，观测只保存拍摄位置 `origin_xy_m` 和 `map` 方位角 `bearing_map_rad`。
 

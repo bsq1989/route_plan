@@ -29,6 +29,7 @@ def check_wheel(path, project):
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
         required = {"route_plan_sdk/__init__.py", "route_plan_sdk/api.py", "route_plan_sdk/observation.py",
+                    "route_plan_sdk/direction_policy.py",
                     "route_plan_sdk/_geometry/boundary.py",
                     "route_plan_sdk/_geometry/config/robot.yaml", "route_plan_sdk/_geometry/world.yaml"}
         if not required.issubset(names):
@@ -69,6 +70,7 @@ def verify_install(uv, wheel, source, workspace):
     run([python, "-I", source / "examples/fence.py"], cwd=consumer)
     run([python, "-I", source / "examples/auto_fence.py"], cwd=consumer)
     run([python, "-I", source / "examples/observation.py"], cwd=consumer)
+    run([python, "-I", source / "examples/gateway_coverage.py"], cwd=consumer)
     result = json.loads((workspace / "response.json").read_text())
     if not result["success"] or set(result["expected_collected_ids"]) != {"object-101", "object-205"}:
         raise ValueError("Installed example did not collect both expected targets")

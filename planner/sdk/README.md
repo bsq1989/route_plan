@@ -1,6 +1,6 @@
 # Route Plan 纯算法 SDK
 
-`route-plan-sdk 0.2.14`，Python 导入名为 `route_plan_sdk`。输入场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。新增 `plan_observation_step()`，用于先观测、再逐站拾取。
+`route-plan-sdk 0.2.15`，Python 导入名为 `route_plan_sdk`。输入场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。提供有状态的 `CoveragePolicy`，用于由 Gateway 执行远近观测和拾取动作。
 
 包内包含任务规划、路径长度优化与必要的私有几何校验内核。没有 IR-SIM、窗口、绘图、动画、场景演示、ROS 或实车控制功能。无需原仓库目录或 `PYTHONPATH`，默认车型文件已随包携带。
 
@@ -29,10 +29,10 @@ source .venv/bin/activate
 python -m pip install .
 
 # 或安装提供的 SDK wheel，二者任选一个
-python -m pip install /完整路径/route_plan_sdk-0.2.14-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.15-py3-none-any.whl
 ```
 
-源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.14`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
+源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.15`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
 
 ## 最小 Python 调用
 
@@ -69,6 +69,56 @@ python examples/multi_pickup.py
 ```
 
 `quick_start.py` 可以复制到其他工程中运行，只有 SDK 导入，没有修改 `sys.path` 或引用原仓库。JSON 调用直接 `plan(request_dict)` 即可；输入示例见 `examples/request.json`。
+
+## Gateway 远近拾取策略
+
+每趟任务创建一个 `CoveragePolicy`。策略维护精测目标、当前与历史方位线索以及可选的二级缓存。Gateway 负责采集、连续避碰和围栏校验、动作执行以及逐目标拾取确认。
+
+```python
+from route_plan_sdk import CoverageConfig, CoveragePolicy
+
+policy = CoveragePolicy(
+    CoverageConfig(precision_range_m=1.4, auto_fence_radius_m=1.4),
+    request_options={"frame_id": "map"},
+    use_deferred_bearings=True,
+)
+
+async def run_task(gateway):
+    while (action := policy.next_action()) is not None:
+        feedback = await gateway.execute(action)
+        policy.submit_result(action.action_id, **feedback)
+    return policy.stop_reason
+```
+
+同一策略实例的调用串行化。重复调用 `next_action()` 会返回同一个待完成动作，Gateway 按 `action_id` 去重。收到对应回执后，策略才推进。过期或重复动作回执返回 `False`。
+
+| `action.kind` | Gateway 的动作 |
+| --- | --- |
+| `observe` | 等车停稳，提交一帧新观测。首个动作的 `start_pose` 为 `None`。 |
+| `turn` | 校验实际扫掠后执行 `goals[0]` 的原地转向。 |
+| `forward` | 校验实际扫掠后向前直行，目标为 `goals[0]`。 |
+| `pickup` | 依次执行 `goals`。按 `pickup_stops[].goal_index` 到位拾取并逐 ID 确认。批次 ID 和圆心坐标可从 `action.targets` 读取。任一停靠拾取失败时停止执行余下轨迹，回传已确认的 ID。 |
+
+回执字段为 `status`、`pose`、`time_s`，另可带 `reason`。位姿为动作结束、底盘停稳后的实测 `[x, y, yaw]`。时间使用同一任务内非递减的秒值。状态可为 `success`、`blocked`、`failed`、`partial`、`timeout` 或 `cancelled`。部分拾取使用 `partial` 和已成功的 `picked_ids`。超时、取消或无法完成取帧时，策略停止下发后续动作。受阻且姿态已变化时先重新取帧。
+
+`observe` 成功时另外回传 `observation`，包含任务内唯一的 `observation_id`、`frame_id` 和 `detections`。可传同一时钟的采集时间 `observation.time_s`。默认坐标系为 `map`，距离用米、角度用弧度。
+
+```python
+{
+    "observation_id": 42,
+    "frame_id": "map",
+    "detections": [
+        {"quality": "precise", "xy_m": [1.2, 0.1]},
+        {"quality": "bearing", "origin_xy_m": [0.0, 0.0], "bearing_map_rad": 0.27},
+    ],
+}
+```
+
+近处精测坐标须在本次观测时的 `precision_range_m` 内。远处方向提供射线原点和固定坐标系下的方位角。策略按坐标关联精测点，可通过 `position_match_tolerance_m` 配置关联容差。默认使用仿真几何容差，接实车时按测量误差设定。拾取返回的 ID 由 SDK 生成，仅绑定该动作。
+
+当前车辆几何以车身中心作为位姿和旋转参考。Gateway 应将实车里程计、相机原点和运动目标换算到一致的坐标系。若实际旋转中心偏离车身中心，需要相应的车辆运动几何。精测范围用于选择本批目标，`auto_fence_radius_m` 约束拾取路线的车身参考点；搜索阶段的转向及直行由 Gateway 校验场地围栏和最新占用。
+
+看到空帧且没有可继续的线索时，策略会在扫视结束后返回 `no_observed_targets`。是否达到实际任务完成条件由 Gateway 决定。可运行 `python examples/gateway_coverage.py` 验证异步动作和反馈循环。
 
 ## 分段观测与拾取
 

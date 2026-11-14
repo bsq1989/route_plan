@@ -1,7 +1,7 @@
 """Run and export a reproducible directional pickup episode."""
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from functools import partial
 import math
 from pathlib import Path
@@ -9,9 +9,34 @@ from pathlib import Path
 from route_plan_sim.directional import DirectionalScene, load_config
 from route_plan_sim.scene import normalize
 
-from .api import PlanningRequest, plan
-from .direction_policy import CoveragePolicy
+from .api import PlanningRequest
+from .direction_policy import CoverageConfig, CoveragePolicy
 from .records import write_json
+
+
+def simulate_action(agent, sim, action):
+    """Execute one strategy action using the simulator's continuous checks."""
+    if action.kind == "observe":
+        frame = sim.capture()
+        agent.submit_result(action.action_id, status="success", pose=sim.pose, time_s=sim.time,
+                            observation={**frame, "observation_id": frame["index"]})
+        updated = agent.latest_frame
+        sim.record_known(frame["index"], updated["known"], deferred=updated["deferred"])
+        return
+    if action.kind == "turn":
+        result = sim.turn(action.goals[0][2])
+    elif action.kind == "forward":
+        result = sim.forward(action.distance_m)
+    elif action.kind == "pickup":
+        stops = [asdict(stop) for stop in action.pickup_stops]
+        positions = {target.id: (target.x, target.y) for target in action.targets}
+        result = sim.execute_pickups(action.goals, stops, positions, frame_index=agent.latest_frame["index"],
+                                     target_positions=positions)
+    else:
+        raise ValueError(f"Unexpected directional action {action.kind}")
+    picked_ids = [target.id for target in action.targets] if result["status"] == "success" else []
+    agent.submit_result(action.action_id, status=result["status"], pose=sim.pose, time_s=sim.time,
+                        picked_ids=picked_ids, reason=result["reason"])
 
 
 def run_case(name, seed=42, config_path=None, *, policy=CoveragePolicy):
@@ -20,51 +45,17 @@ def run_case(name, seed=42, config_path=None, *, policy=CoveragePolicy):
     reference = config["custom"].get("robot_config")
     robot_config = (Path(config_path).resolve().parent / reference) if config_path and reference else None
     sim = DirectionalScene(config, name, seed, robot_config, planner_request=PlanningRequest.from_scene)
-    agent = policy(sim, plan)
-    frame = agent.capture()
-    if case.get("probe_initial_heading") and frame["detections"]:
-        success, _ = agent.pickup(frame)
-        if not success:
-            frame = agent.approach(frame["detections"][0], frame)
-            agent.pickup(frame)
-        if not sim.all_collected:
-            frame = agent.capture()
-    reason, tried = "round_limit", set()
-    last_failure = None
-    for _ in range(sim.regions.maximum_rounds):
-        if sim.all_collected:
-            break
-        start_xy = sim.pose[:2]
-        ok, latest_reason = agent.evaluate(frame, tried)
-        if not ok and latest_reason != "no_safe_heading":
-            last_failure = latest_reason
-        if not ok:
-            if sim.pose[:2] != start_xy:
-                frame = agent.capture()
-                continue
-            scan_pose = sim.pose[:2]
-            for frame in agent.scan():
-                ok, next_reason = agent.evaluate(frame, tried)
-                if ok:
-                    break
-                if next_reason != "no_safe_heading":
-                    last_failure = next_reason
-        if not ok:
-            if sim.pose[:2] != scan_pose:
-                frame = agent.capture()
-                continue
-            reason = (last_failure or "no_safe_heading") if agent.memory else "no_observed_targets"
-            break
-        tried.clear()
-        last_failure = None
-        # The simulator can end an episode when its objective is satisfied.
-        # CoveragePolicy still decides solely from observations and feedback.
-        if sim.all_collected:
-            break
-        frame = agent.capture()
+    regions = asdict(sim.regions)
+    coverage = CoverageConfig(**{field.name: regions[field.name] for field in fields(CoverageConfig)
+                                if field.name in regions},
+                              probe_initial_heading=case.get("probe_initial_heading", False))
+    agent = policy(coverage, request_options=sim.request([]).to_dict())
+    while not sim.all_collected and (action := agent.next_action()) is not None:
+        simulate_action(agent, sim, action)
     final = sim.final_state()
-    if not final["remaining"]:
-        reason = "all_collected"
+    reason = "all_collected" if not final["remaining"] else agent.stop_reason
+    for entry in agent.plans:
+        entry["trace_index"] = sim.observations[entry["frame_index"]]["trace_index"]
     collected, remaining = final["collected"], final["remaining"]
     rotations, approach_m, pickup_m = 0., 0., 0.
     for left, right in zip(sim.trace, sim.trace[1:]):
@@ -76,7 +67,7 @@ def run_case(name, seed=42, config_path=None, *, policy=CoveragePolicy):
             pickup_m += distance
     return {
         "case": name, "case_config": case, "seed": seed, "frame_id": "map", "scene_config": sim.world_config,
-        "regions": asdict(sim.regions), "initial": sim.initial,
+        "regions": regions, "initial": sim.initial,
         "observations": sim.observations, "decisions": agent.decisions, "approaches": agent.approaches,
         "plans": agent.plans, "actions": sim.actions, "trace": sim.trace,
         "remaining": remaining, "collected": collected, "unresolved_observations": list(agent.memory.values()),
