@@ -134,6 +134,12 @@ uv run --project planner python -m route_plan_planner.directional --case two-clu
 
 `random-40-interior` 在相同场地把 40 个圆心投放到可转向的内区。`random_require_turn_clearance` 按车身安全矩形与消除器最远角到 `base_link` 的距离，再加目标半径，计算圆心到场地边界的最小间距。默认车型约为 0.681 m。此设置只影响目标生成，车辆仍在原有场地内按同一套避碰和围栏规则执行。
 
+带 `--cluster-radius 1.6` 运行 `cluster-search` 或 `random-40-interior`，可以验证基于粗坐标的簇搜索。发现扇区内的远处目标会输出带有随机误差的粗测坐标，误差上限由 `coarse_error_m` 配置，默认 0.12 m。IR-SIM 用圆圈标记粗测簇范围，橙色虚线为当前簇。发现精测目标时先执行局部拾取，图中的 `auto_fence` 单独标记该批运动范围。JSON 记录选簇、分段接近和最终环视。
+
+```bash
+uv run --project planner python -m route_plan_planner.directional --case cluster-search --cluster-radius 1.6 --show
+```
+
 [directional.yaml](src/route_plan_sim/directional.yaml) 可编辑场地、物品、遮挡和发现扇区、清理圆环、精测距离及局部 `auto_fence` 半径。把 `world`、`robot`、`custom.fence_enabled` 和 `custom.fence` 改为所需围栏配置，再设置围栏内的用例位姿和物品即可换场地。默认圆环为 0.75–1.4 m / 60°，精测距离与 `auto_fence` 分别配置，默认均为 1.4 m。
 
 `run_case()` 使用与 Gateway 相同的 `CoveragePolicy.next_action()` 和 `submit_result()` 接口。仿真执行器调用 `DirectionalScene.capture()`、`turn(yaw)`、`forward(metres)` 和 `execute_pickups()`，回传实际位姿和拾取 ID。局部计划先在完整场景副本中执行，触碰边界、碰到漏检物品或拾取不符时整次拒绝。可通过 `run_case(..., policy=...)` 替换策略。

@@ -9,6 +9,140 @@ from route_plan_sim.directional import DirectionalScene, load_config
 
 
 class DirectionalTest(unittest.TestCase):
+    def test_cluster_search_respects_density_and_remeasures_before_pickup(self):
+        record = run_case("cluster-search", seed=42, cluster_radius_m=1.6)
+        selections = [d for d in record["decisions"] if d["rule"] == "cluster_density"]
+        self.assertEqual([len(d["candidates"]) for d in selections], [2, 2, 1])
+        self.assertGreater(selections[0]["candidates"][0]["pending"], selections[0]["candidates"][1]["pending"])
+        self.assertTrue(all(d["selected"] == d["candidates"][0]["id"] for d in selections))
+        self.assertEqual([visit["cluster_id"] for visit in record["cluster_visits"]],
+                         [d["selected"] for d in selections])
+        self.assertEqual(len({d["selected"] for d in selections}), len(selections))
+        observations = record["observations"]
+        self.assertTrue(all(d["quality"] == "coarse" for d in observations[0]["detections"]))
+        anchors = {}
+        for frame in observations:
+            for cluster in frame["clusters"]:
+                cid, anchor = cluster["id"], cluster["anchor_xy_m"]
+                self.assertEqual(anchor, anchors.setdefault(cid, anchor))
+            for item in frame["known"]:
+                if item["quality"] == "coarse":
+                    self.assertLessEqual(math.dist(item["xy_m"], anchors[item["cluster_id"]]), 1.6 + 1e-9)
+                else:
+                    self.assertNotIn("cluster_id", item)
+        for plan in record["plans"]:
+            measured = {d["xy_m"] for frame in observations[:plan["frame_index"] + 1]
+                        for d in frame["detections"] if d["quality"] == "precise"}
+            self.assertTrue(all((p["x"], p["y"]) in measured for p in plan["request"]["targets"]))
+        self.assertEqual(len(record["collected"]), 12)
+        self.assertEqual(record["actions"][-1]["stage"], "final_scan")
+        self.assertEqual(record["policy_stop_reason"], "no_observed_targets")
+
+    def test_cluster_iterator_and_supplemental_observation(self):
+        policy = CoveragePolicy(CoverageConfig(cluster_radius_m=1.6))
+        self.assertFalse(policy.is_next_cluster())
+        self.assertIsNone(policy.next_cluster())
+        action = policy.next_action()
+        pose = (0., 0., 0.)
+        main = {"observation_id": 1, "detections": [{"quality": "coarse", "xy_m": (2., 0.)}]}
+        supplement = [{"quality": "coarse", "xy_m": point}
+                      for point in ((2.05, 0.), (0., 3.), (.4, 3.))]
+        with self.assertRaises(ValueError):
+            policy.submit_observation(action.action_id, pose=pose, time_s=1., observation=main,
+                                      supplemental_detections=([{"quality": "precise", "xy_m": (0., 3.)}],))
+        self.assertIs(policy.next_action(), action)
+        self.assertTrue(policy.submit_observation(action.action_id, pose=pose, time_s=1., observation=main,
+                                                  supplemental_detections=(supplement,)))
+        motion = policy.next_action()
+        self.assertEqual(motion.kind, "turn")
+        self.assertTrue(policy.is_next_cluster())
+        self.assertTrue(policy.is_next_cluster())
+        cluster = policy.next_cluster()
+        self.assertEqual((cluster.anchor_xy_m, cluster.radius_m, cluster.pending_count), ((0., 3.), 1.6, 2))
+        self.assertFalse(policy.is_next_cluster())
+        self.assertIs(policy.next_action(), motion)
+        self.assertFalse(policy.submit_observation(action.action_id, pose=pose, time_s=1., observation=main))
+        self.assertFalse(policy.submit_observation(motion.action_id, pose=pose, time_s=1., observation=main))
+        self.assertEqual(len(policy.memory), 3)
+
+    def test_precise_observation_interrupts_search_with_no_coarse_match(self):
+        policy = CoveragePolicy(CoverageConfig(cluster_radius_m=1.6))
+        first = policy.next_action()
+        policy.submit_observation(
+            first.action_id, pose=(0., 0., 0.), time_s=0.,
+            observation={"observation_id": 1, "detections": [{"quality": "coarse", "xy_m": (1.6, 0.)}]},
+        )
+        motion = policy.next_action()
+        cluster = policy.next_cluster()
+        self.assertEqual(cluster.pending_count, 1)
+        policy.submit_result(motion.action_id, status="success", pose=motion.goals[0], time_s=1.)
+        observe = policy.next_action()
+        points = ((1.6, 0.), (.36, 1.05))
+        policy.submit_observation(
+            observe.action_id, pose=motion.goals[0], time_s=2.,
+            observation={"observation_id": 2, "detections": [{"quality": "precise", "xy_m": points[0]}]},
+            supplemental_detections=([{"quality": "precise", "xy_m": points[1]}],),
+        )
+        pickup = policy.next_action()
+        self.assertEqual(pickup.kind, "pickup")
+        self.assertEqual({(t.x, t.y) for t in pickup.targets}, set(points))
+        self.assertEqual(policy.latest_frame["clusters"][0]["pending"], 1)
+        self.assertTrue(all("cluster_id" not in item for item in policy.memory.values()
+                            if item["quality"] == "precise"))
+        self.assertFalse(policy.is_next_cluster())
+
+    def test_cluster_does_not_turn_again_for_hint_checked_in_current_view(self):
+        policy = CoveragePolicy(CoverageConfig(cluster_radius_m=1.6))
+        observe = policy.next_action()
+        policy.submit_observation(
+            observe.action_id, pose=(0., 0., 0.), time_s=0.,
+            observation={"observation_id": 1, "detections": [
+                {"quality": "coarse", "xy_m": (1.65, .1)},
+                {"quality": "coarse", "xy_m": (1.7, -.12)},
+            ]},
+        )
+        time_s = 0.
+        while (action := policy.next_action()) is not None:
+            self.assertLess(time_s, 12.)
+            time_s += 1.
+            if action.kind == "observe":
+                policy.submit_observation(action.action_id, pose=policy.pose, time_s=time_s,
+                                          observation={"observation_id": int(time_s) + 10, "detections": []})
+            else:
+                policy.submit_result(action.action_id, status="success", pose=action.goals[0], time_s=time_s)
+        selected = [d for d in policy.decisions if d["rule"] == "cluster_density"]
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(len([a for a in policy.approaches if a.get("commanded_m")]), 1)
+        self.assertEqual(policy.stop_reason, "no_observed_targets")
+
+    def test_popped_cluster_stays_out_of_queue_after_rediscovery(self):
+        policy = CoveragePolicy(CoverageConfig(cluster_radius_m=1.6))
+        pose = (0., 0., 0.)
+        point = {"quality": "coarse", "xy_m": (2., 0.)}
+        first = policy.next_action()
+        policy.submit_observation(first.action_id, pose=pose, time_s=0.,
+                                  observation={"observation_id": 1, "detections": [point]})
+        selected = policy.next_cluster()
+        for time_s in (1., 2.):
+            step = policy.next_action()
+            self.assertEqual(step.kind, "forward")
+            policy.submit_result(step.action_id, status="blocked", pose=pose, time_s=time_s)
+        turn = policy.next_action()
+        self.assertEqual(turn.kind, "turn")
+        policy.submit_result(turn.action_id, status="success", pose=turn.goals[0], time_s=3.)
+        observe = policy.next_action()
+        policy.submit_observation(observe.action_id, pose=turn.goals[0], time_s=4.,
+                                  observation={"observation_id": 2, "detections": [point]})
+        self.assertFalse(policy.is_next_cluster())
+        self.assertIn(selected.cluster_id, {hint["cluster_id"] for hint in policy.memory.values()})
+
+    def test_cluster_search_retains_hints_when_motion_is_blocked(self):
+        record = run_case("blocked", seed=42, cluster_radius_m=1.6)
+        self.assertEqual(record["policy_stop_reason"], "incomplete_final_scan")
+        self.assertTrue(record["unresolved_observations"])
+        self.assertTrue(any(action["status"] == "blocked" for action in record["actions"]))
+        self.assertIsNone(record["failure"])
+
     def test_interior_random_case_keeps_turn_footprint_away_from_walls(self):
         config = load_config()
         sim = DirectionalScene(config, "random-40-interior", 42, planner_request=PlanningRequest.from_scene)

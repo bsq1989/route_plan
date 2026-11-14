@@ -65,6 +65,8 @@ const xy = (x,y) => [320+(x-(xmin+xmax)/2)*scale, 280-(y-(ymin+ymax)/2)*scale];
 const dims = data.initial.dimensions, targets = data.initial.remaining;
 const labels = {initial:"初始发现", turn:"原地转向", approach:"定向渐近", pickup:"执行局部计划", pickup_stop:"停靠拾取"};
 const reasons = {all_collected:"已全清", no_observed_targets:"没有观测到剩余物品",
+  unresolved_cluster_hints:"仍有未确认的簇线索", incomplete_final_scan:"末尾环视受阻",
+  unresolved_precise_targets:"仍有未拾取的精测目标",
   no_precise_batch:"当前没有可拾取的精测批次", no_safe_heading:"没有可安全执行的候选朝向",
   round_limit:"达到轮数上限", pickup_conflict:"停靠点的实际覆盖与批次不符",
   "Map boundary":"场地触边", "Motion circle boundary":"超出 auto_fence"};
@@ -110,6 +112,15 @@ function render(){
   for(let py=Math.ceil(ymin*2)/2;py<ymax;py+=.5)path([[xmin,py],[xmax,py]],null,"#e8efea",false);
   wedge(x,y,yaw,regions.view_angle_deg,0,regions.view_range_m,"#75adc359");
   wedge(x,y,yaw,regions.pickup_angle_deg,regions.pickup_inner_radius_m,regions.pickup_outer_radius_m,"#57b5958a");
+  if(regions.cluster_radius_m){
+    const active=decision?.rule==="cluster_density"?decision.selected:null;
+    for(const cluster of observation?.clusters||[]){
+      if(!cluster.pending && cluster.id!==active)continue;
+      ctx.setLineDash(cluster.id===active?[6,4]:[2,4]);
+      disk(...cluster.anchor_xy_m,regions.cluster_radius_m,null,cluster.id===active?"#ca751b":"#64748b");
+    }
+    ctx.setLineDash([]);
+  }
   if(frame.auto_fence){ctx.setLineDash([7,4]);disk(...frame.auto_fence,null,"#885ab9");ctx.setLineDash([])}
   ctx.lineWidth=2;path(frames.slice(0,index+1).map(item=>item.pose.slice(0,2)),null,"#627a71",false);ctx.lineWidth=1;
   for(const [bx,by,r] of data.initial.obstacles||[]) disk(bx,by,r,"#44544d");
@@ -141,7 +152,9 @@ function render(){
   get("stage").textContent=labels[frame.stage]||frame.stage;
   get("clock").textContent=frame.time_s.toFixed(2)+" s · "+(index+1)+" / "+frames.length+" 帧";
   get("pose").textContent=x.toFixed(3)+" m / "+y.toFixed(3)+" m / "+(yaw*180/Math.PI).toFixed(1)+"°";
-  get("choice").textContent=candidate ? "覆盖 "+candidate.ids.length+" 条连线 · 参考 #"+candidate.reference_id : "等待选向";
+  get("choice").textContent=decision?.rule==="cluster_final_scan" ? "原地环视检查" :
+    decision?.rule==="cluster_density" ? "选中簇 C"+candidate :
+    candidate ? "覆盖 "+candidate.ids.length+" 条连线 · 参考 #"+candidate.reference_id : "等待选向";
   get("batch").textContent=batchIds.size ? [...batchIds].map(id=>"#"+id).join("、") :
     plan ? "最近一批 "+plan.batch_ids.map(id=>"#"+id).join("、")+(plan.reason?" · "+(reasons[plan.reason]||plan.reason):"") : "等待停稳重测";
   get("progress").textContent="观测 "+(observation?observation.index+1:0)+" 帧 · 已拾取 "+used.size+" 件";

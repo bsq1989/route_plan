@@ -29,6 +29,7 @@ class Regions:
     auto_fence_radius_m: float
     miss_probability: float
     maximum_rounds: int
+    coarse_error_m: float = 0.
 
     def __post_init__(self):
         if not all(math.isfinite(value) for value in asdict(self).values()):
@@ -38,6 +39,7 @@ class Regions:
                 or min(self.view_range_m, self.precision_range_m, self.auto_fence_radius_m) <= 0
                 or not 0 <= self.approach_tolerance_m <= self.pickup_outer_radius_m - self.pickup_inner_radius_m
                 or not 0 <= self.miss_probability <= 1
+                or self.coarse_error_m < 0
                 or type(self.maximum_rounds) is not int or self.maximum_rounds < 1):
             raise ValueError("Invalid directional regions")
 
@@ -58,7 +60,7 @@ def load_config(path=None):
 
 
 class DirectionalScene:
-    def __init__(self, config, name, seed, robot_config=None, *, planner_request):
+    def __init__(self, config, name, seed, robot_config=None, *, planner_request, coarse_coordinates=False):
         options = config["custom"]["directional"]
         case = options["cases"][name]
         params = {key: case.get(key, value) for key, value in options.items() if key != "cases"}
@@ -86,6 +88,8 @@ class DirectionalScene:
             self._scene.add_targets(case["targets"])
         self._planner_request = planner_request
         self._noise = Random(seed)
+        self._coarse_noise = Random(seed)
+        self._coarse_coordinates = coarse_coordinates
         self._next_detection_id = 1
         self._frame_targets = {}
         self._precise_targets = set()
@@ -123,6 +127,11 @@ class DirectionalScene:
             if distance <= params.precision_range_m + EPS:
                 self._precise_targets.add(key)
                 detections.append({"id": detection_id, "xy_m": point, "quality": "precise"})
+            elif self._coarse_coordinates:
+                angle = self._coarse_noise.uniform(0., math.tau)
+                error = self._coarse_noise.uniform(0., params.coarse_error_m)
+                estimate = (point[0] + error * math.cos(angle), point[1] + error * math.sin(angle))
+                detections.append({"id": detection_id, "xy_m": estimate, "quality": "coarse"})
             else:
                 detections.append({"id": detection_id, "quality": "bearing", "origin_xy_m": scene.pose[:2],
                                    "bearing_map_rad": normalize(angle + scene.pose[2])})
@@ -132,9 +141,11 @@ class DirectionalScene:
         self.observations.append(deepcopy(frame))
         return frame
 
-    def record_known(self, index, detections, *, deferred=()):
+    def record_known(self, index, detections, *, deferred=(), clusters=None):
         self.observations[index]["known"] = [dict(item) for item in detections]
         self.observations[index]["deferred"] = [dict(item) for item in deferred]
+        if clusters is not None:
+            self.observations[index]["clusters"] = clusters
 
     def _occluded(self, distance, yaw, blockers):
         x, y = self.pose[:2]

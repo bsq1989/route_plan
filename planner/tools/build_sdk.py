@@ -35,12 +35,12 @@ def build(output: Path):
         'from .escape import EscapeResponse, plan_escape\n'
         'from .adjustment import plan_pickup_adjustment\n'
         'from .observation import CoarseTarget, ObservationResponse, plan_observation_step\n'
-        'from .direction_policy import CoverageAction, CoverageConfig, CoveragePolicy\n'
+        'from .direction_policy import CoverageAction, CoverageCluster, CoverageConfig, CoveragePolicy\n'
         f'__version__ = "{version}"\n'
         '__all__ = ["Target", "PlanningRequest", "PlanningResponse", "PlanStep", "PickupStop", "plan",\n'
         '           "EscapeResponse", "plan_escape", "plan_pickup_adjustment",\n'
         '           "CoarseTarget", "ObservationResponse", "plan_observation_step",\n'
-        '           "CoverageAction", "CoverageConfig", "CoveragePolicy", "__version__"]\n')
+        '           "CoverageAction", "CoverageCluster", "CoverageConfig", "CoveragePolicy", "__version__"]\n')
     geometry = package / "_geometry"
     geometry.mkdir()
     for name in ("__init__.py", "scene.py", "boundary.py", "config.py", "control.py"):

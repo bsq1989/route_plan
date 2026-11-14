@@ -9,10 +9,10 @@ from .api import Target, PlanningRequest, PlanningResponse, PlanStep, PickupStop
 from .escape import EscapeResponse, plan_escape
 from .adjustment import plan_pickup_adjustment
 from .observation import CoarseTarget, ObservationResponse, plan_observation_step
-from .direction_policy import CoverageAction, CoverageConfig, CoveragePolicy
+from .direction_policy import CoverageAction, CoverageCluster, CoverageConfig, CoveragePolicy
 
 __all__ = ["PlannerOptions", "PlanResult", "StaticPlanner", "TaskPlanner", "MotionBackend",
            "LengthOptions", "LengthPlanner", "replay", "Target", "PlanningRequest",
            "PlanningResponse", "PlanStep", "PickupStop", "StopsPlanner", "plan", "EscapeResponse",
            "plan_escape", "plan_pickup_adjustment", "CoarseTarget", "ObservationResponse", "plan_observation_step",
-           "CoverageAction", "CoverageConfig", "CoveragePolicy"]
+           "CoverageAction", "CoverageCluster", "CoverageConfig", "CoveragePolicy"]

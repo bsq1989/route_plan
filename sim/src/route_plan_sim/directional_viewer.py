@@ -19,6 +19,9 @@ STAGES = {"initial": "原地发现", "turn": "原地转向", "approach": "定向
           "pickup": "执行局部计划", "pickup_stop": "停靠拾取"}
 REASONS = {"all_collected": "全部清除", "no_precise_batch": "没有可拾取的精测批次",
            "no_observed_targets": "没有发现剩余目标", "no_safe_heading": "没有安全的候选朝向",
+           "unresolved_cluster_hints": "仍有未确认的簇线索",
+           "unresolved_precise_targets": "仍有未拾取的精测目标",
+           "incomplete_final_scan": "末尾环视受阻",
            "round_limit": "达到轮数上限", "Map boundary": "场地触边",
            "Motion circle boundary": "超出 auto_fence", "pickup_conflict": "拾取批次不符",
            "No complete pickup plan satisfies the motion deadband": "未找到完整拾取路线"}
@@ -33,6 +36,10 @@ class DirectionalViewer:
         self.times = [frame["time_s"] for frame in self.frames]
         self.observation_indices = [frame["trace_index"] for frame in record["observations"]]
         self.plan_indices = [plan["trace_index"] for plan in record["plans"]]
+        self.cluster_radius = record["regions"].get("cluster_radius_m")
+        self.cluster_actions = [action for action in record["actions"] if action["trace_end"] > action["trace_start"]]
+        self.action_starts = [action["trace_start"] for action in self.cluster_actions]
+        self.cluster_artists = []
         config = record["scene_config"]
         world, custom = config["world"], config["custom"]
         fence = custom.get("fence") if custom.get("fence_enabled", True) else None
@@ -51,7 +58,8 @@ class DirectionalViewer:
         self.fig.set_size_inches(10.4, 8.0, forward=True)
         self.fig.set_facecolor("#f1f4f9")
         self.fig.subplots_adjust(left=.12, right=.91, bottom=.17, top=.81)
-        self.fig.suptitle("定向接近与分区拾取", x=.1, y=.965, ha="left", fontsize=21, color="#24334a")
+        title = "聚类搜索与分区拾取" if self.cluster_radius else "定向接近与分区拾取"
+        self.fig.suptitle(title, x=.1, y=.965, ha="left", fontsize=21, color="#24334a")
         self.fig.text(.91, .95, "IR-SIM", ha="right", color="#52627b")
         self.status = self.fig.text(.1, .905, "", fontsize=11, color="#24334a")
         self.detail = self.fig.text(.1, .09, "", fontsize=10, color="#52627b")
@@ -81,12 +89,18 @@ class DirectionalViewer:
         self.safety_rect = Rect(-hx - m, -hy - m, hx + m, hy + m)
         self.collector_rect = Rect(front, lateral - tool["width"] / 2,
                                   front + tool["depth"], lateral + tool["width"] / 2)
-        self.fig.legend(handles=[
+        legend = [
             Patch(fc="#72b8e2", alpha=.35, label="发现扇区"), Patch(fc="#3bb693", alpha=.45, label="拾取圆环"),
             Patch(fill=False, ec="#8155af", ls="--", label="auto_fence"),
-            Patch(fc="#f4ab45", label="目标圆"), Patch(fill=False, ec="#a96a28", ls="--", label="方位线索"),
+            Patch(fc="#f4ab45", label="目标圆"),
             Patch(fc="#236db2", label="精测连线"), Patch(fc="#ce5149", label="当批目标"),
-        ], loc="upper center", bbox_to_anchor=(.515, .872), ncol=7, fontsize=9, frameon=False)
+        ]
+        if self.cluster_radius:
+            legend.append(Patch(fill=False, ec="#ca751b", ls="--", label="当前簇"))
+        else:
+            legend.append(Patch(fill=False, ec="#a96a28", ls="--", label="方位线索"))
+        self.fig.legend(handles=legend, loc="upper center", bbox_to_anchor=(.515, .872), ncol=7,
+                        fontsize=9, frameon=False)
         self.index = 0
         self.timer = self.fig.canvas.new_timer(interval=40)
         self.timer.add_callback(self.advance)
@@ -149,6 +163,24 @@ class DirectionalViewer:
 
         obs_index = bisect_right(self.observation_indices, index) - 1
         obs = self.record["observations"][obs_index] if obs_index >= 0 else {}
+        action_index = bisect_right(self.action_starts, index - 1) - 1
+        action = self.cluster_actions[action_index] if action_index >= 0 else {}
+        active = action.get("cluster_id")
+        for artist in self.cluster_artists:
+            artist.remove()
+        self.cluster_artists.clear()
+        if self.cluster_radius:
+            for cluster in obs.get("clusters", ()):
+                key = cluster["id"]
+                if not cluster["pending"] and key != active:
+                    continue
+                cx, cy = cluster["anchor_xy_m"]
+                color = "#ca751b" if key == active else "#64748b"
+                outline = self.ax.add_patch(Circle((cx, cy), self.cluster_radius, fill=False, ec=color,
+                                                   ls="--" if key == active else ":", lw=1.5, zorder=2))
+                label = self.ax.annotate(f"C{key} · {cluster['pending']}", (cx, cy), xytext=(5, 6),
+                                         textcoords="offset points", color=color, fontsize=8, clip_on=True, zorder=6)
+                self.cluster_artists.extend((outline, label))
         plan_index = bisect_right(self.plan_indices, index) - 1
         batch = self.record["plans"][plan_index]["request"]["targets"] if frame["auto_fence"] and plan_index >= 0 else []
         batch_points = {(target["x"], target["y"]) for target in batch}
@@ -176,11 +208,14 @@ class DirectionalViewer:
         self.links.set_colors(colors)
         self.links.set_linestyles(styles or ["-"])
         stage = STAGES[frame["stage"]]
+        if action.get("stage") == "final_scan":
+            stage = "原地环视检查"
         if index == len(self.frames) - 1:
             reason = self.record["stop_reason"]
             stage = REASONS.get(reason, reason)
         self.status.set_text(f"{self.record['case']} · {stage}    已拾取 {len(picked)} / {len(targets)}")
         self.detail.set_text(f"{frame['time_s']:.2f} s   ·   观测 {obs_index + 1} 帧   ·   朝向 {heading:.1f}°"
+                             + (f"   ·   当前簇 C{active}" if active is not None else "")
                              + (f"   ·   本批 {len(batch)} 件" if batch else ""))
 
     def on_key(self, event):

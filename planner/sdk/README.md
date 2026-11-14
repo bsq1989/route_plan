@@ -116,6 +116,39 @@ async def run_task(gateway):
 
 近处精测坐标须在本次观测时的 `precision_range_m` 内。远处方向提供射线原点和固定坐标系下的方位角。策略按坐标关联精测点，可通过 `position_match_tolerance_m` 配置关联容差。默认使用仿真几何容差，接实车时按测量误差设定。拾取返回的 ID 由 SDK 生成，仅绑定该动作。
 
+有远处粗坐标时，可用 `CoverageConfig(cluster_radius_m=1.6)` 启用按簇搜索。观测使用 `{"quality": "coarse", "xy_m": [x, y]}` 或 `precise`，坐标统一使用 `map`。粗坐标用于归簇和分段接近。`coarse_match_tolerance_m` 仅用于跨帧粗点去重，默认 0.25 m。每个新簇以首次归入的粗坐标为固定锚点，新点落在多个簇内时选最近的锚点。
+
+每次观测后，先把当前精测范围内的未拾取精测点交给局部 `plan`，包括当前搜索簇以外的点。拾取确认后重新观测。每次确认没有可拾取的精测点时，本帧精测视野内未再出现的旧粗线索记为已检查。粗线索和精测点分别维护，拾取回执只清理本批确认成功的精测点。
+
+换簇时按最新观测更新优先队列，弹出待检查点最多的簇。半径相同，待检查点数可用于比较密度，点数相同时依次比较距锚点的距离和转角。同一任务里，每个簇只弹出一次。各簇处理完后，在当前车位检查尚未覆盖的角度。仍有精测目标、仍有待确认的粗线索和环视未完成分别用 `unresolved_precise_targets`、`unresolved_cluster_hints` 和 `incomplete_final_scan` 表示。
+
+每次选定新簇后，`is_next_cluster()` 返回是否有尚未读取的结果，`next_cluster()` 按顺序取出一个 `CoverageCluster`，含 `cluster_id`、`anchor_xy_m`、`radius_m` 和选中时的 `pending_count`。无结果时返回 `None`。选簇记录可用来更新业务状态。任务结束以 `next_action() is None` 和 `stop_reason` 为准。
+
+执行 `observe` 时，Gateway 可收集同一停车位的多批检测。每个补充帧作为独立列表传给 `submit_observation()`。SDK 按批关联坐标，先融合观测，再计算下一动作。所有坐标须换算到任务坐标系，每批须保留独立物品。
+
+```python
+policy = CoveragePolicy(CoverageConfig(cluster_radius_m=1.6))
+
+while True:
+    action = policy.next_action()
+    while policy.is_next_cluster():
+        cluster = policy.next_cluster()
+        print(cluster.cluster_id, cluster.anchor_xy_m, cluster.pending_count)
+    if action is None:
+        break
+    if action.kind == "observe":
+        pose, time_s, frame, extra_frames = await gateway.observe()
+        policy.submit_observation(
+            action.action_id, pose=pose, time_s=time_s, observation=frame,
+            supplemental_detections=extra_frames,
+        )
+    else:
+        feedback = await gateway.execute(action)
+        policy.submit_result(action.action_id, **feedback)
+```
+
+`frame` 使用上面的观测结构。`extra_frames` 如 `[[{"quality": "coarse", "xy_m": [2.1, 0.2]}]]`。有多路相机或连续补拍时，每批传一个列表。可运行 `python examples/gateway_coverage.py --cluster` 查看完整流程。
+
 当前车辆几何以车身中心作为位姿和旋转参考。Gateway 应将实车里程计、相机原点和运动目标换算到一致的坐标系。若实际旋转中心偏离车身中心，需要相应的车辆运动几何。精测范围用于选择本批目标，`auto_fence_radius_m` 约束拾取路线的车身参考点；搜索阶段的转向及直行由 Gateway 校验场地围栏和最新占用。
 
 看到空帧且没有可继续的线索时，策略会在扫视结束后返回 `no_observed_targets`。是否达到实际任务完成条件由 Gateway 决定。可运行 `python examples/gateway_coverage.py` 验证异步动作和反馈循环。
