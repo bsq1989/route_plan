@@ -155,7 +155,7 @@ class FenceTest(unittest.TestCase):
         fence = [[.662275845, -2.927050271], [-.837475480, .365602301],
                  [1.607158116, 1.497195037], [2.675180813, -.846052098],
                  [2.221171244, -1.054056482], [2.660034521, -2.016756562]]
-        request = self.request(fence=fence, pose=[.519444754, -.462152687, -2.468598640],
+        request = self.request(fence=fence, pose=[.519444754, -.462152687, -2.468598640], pickup_margin_m=0.,
                                targets=[{"id": "corner", "x": -.697207904, "y": .350987492}])
         response = plan(request)
         self.assertTrue(response.success, response.reason)

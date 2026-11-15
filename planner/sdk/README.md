@@ -1,6 +1,6 @@
 # Route Plan 纯算法 SDK
 
-`route-plan-sdk 0.2.15`，Python 导入名为 `route_plan_sdk`。输入场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。提供有状态的 `CoveragePolicy`，用于由 Gateway 执行远近观测和拾取动作。
+`route-plan-sdk 0.2.16`，Python 导入名为 `route_plan_sdk`。输入场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。提供有状态的 `CoveragePolicy`，用于由 Gateway 执行远近观测和拾取动作。
 
 包内包含任务规划、路径长度优化与必要的私有几何校验内核。没有 IR-SIM、窗口、绘图、动画、场景演示、ROS 或实车控制功能。无需原仓库目录或 `PYTHONPATH`，默认车型文件已随包携带。
 
@@ -29,10 +29,10 @@ source .venv/bin/activate
 python -m pip install .
 
 # 或安装提供的 SDK wheel，二者任选一个
-python -m pip install /完整路径/route_plan_sdk-0.2.15-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.16-py3-none-any.whl
 ```
 
-源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.15`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
+源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.16`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
 
 ## 最小 Python 调用
 
@@ -245,6 +245,7 @@ else:
 - `targets`：`Target(id,x,y)` 列表，坐标为圆心。ID 可为非空字符串或整数，输出保留原 ID 类型；重复 ID 会报错。允许圆心重合及圆形目标重叠，所有原始 ID 都保留。
 - `target_diameter`：全部物体统一直径，默认 0.10 米；显式传 0 可表示历史点模型。
 - `method`：`feasibility`、`length` 或 `stops`，默认 `length`。实车停靠模式显式传 `method="stops"`。在全部清除且无碰撞的前提下，此模式优化拾取停靠次数，路程作为结果统计。每段实际平移大于 5 cm，每次实际转向大于 1°，包含平移前对准和到位后的末端转向。预算耗尽时返回已验证的可行路线（如果已找到）。运动死区是内置规则，无需增加输入字段。
+- `pickup_margin_m`：停靠拾取的内缩余量，单位米。调用 `plan(method="stops")` 时默认 `0.03`，要求每个批次目标的圆心在消除区内，且距原边界大于 3 cm。显式传 `0` 可使用原边界。矩形和多边形均支持。局部修正也可传入此参数，省略时使用原边界。如果一个位姿无法覆盖整批目标，停靠规划会继续搜索多个位姿。若找不到满足余量的完整路线，返回失败和空路线。余量只用于判定拾取覆盖，碰撞、场地 fence 和 auto fence 沿用各自原有几何。
 - `timeout`：搜索预算，默认 3 秒；包括取得可行初解的耗时，最终回放和响应整理可能增加调用总耗时。
 - `robot_config`：可选车辆 YAML 路径或完整配置字典，省略时使用随包默认车型。默认车身长宽高为 0.702/0.610/0.169 米，高度仅作记录。每侧安全外扩 0.050 米。默认 `body.pose_reference` 和 `body.rotation_center` 为 `base_link`，`body.front_x` 为 0.341 米。`collector.polygon` 使用该参考系下的米制 `[[x, y], ...]` 顶点，支持单个无孔的凹多边形。旧车型仍可传 `body_center` 位姿参考和矩形消除区，矩形的 `gap` 省略时沿用 `body_margin`。响应的 `resolved_request.robot_config` 返回实际车型。
 - `request_id / frame_id`：可选关联标识，随响应返回；`frame_id` 默认 `map`，仅作标识，不执行坐标变换。

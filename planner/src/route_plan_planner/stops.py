@@ -62,7 +62,12 @@ def materialize_stops(scene: Scene, initial: PlanResult) -> PlanResult:
     """
     if initial.status != "success":
         return deepcopy(initial)
-    trial = at_stop_scene(scene)
+    nominal = at_stop_scene(scene)
+    # The contact seed proposes poses only. _executable_seed checks their
+    # coverage again with the actual stop inset before accepting a route.
+    nominal.pickup_margin_m = 0.
+    nominal.config["custom"].pop("pickup_margin_m", None)
+    trial = nominal.clone()
     contact = center_contact_scene(scene)
     goals, stops = [], []
 
@@ -108,7 +113,7 @@ def materialize_stops(scene: Scene, initial: PlanResult) -> PlanResult:
             if trial.failure:
                 raise ValueError("Split contact plan collides after pickup")
             append_goal()
-    final = replay(at_stop_scene(scene), goals, pickup_stops=stops)
+    final = replay(nominal, goals, pickup_stops=stops)
     if final.failure or final.targets:
         raise ValueError("Stop incumbent failed independent replay")
     result = deepcopy(initial)
@@ -197,19 +202,18 @@ class StopsPlanner:
         if not scene.contains_motion_point(x, y):
             return None
         c, s = math.cos(yaw), math.sin(yaw)
-        # The connector still checks both swept footprints along each motion.
-        scene.pose = pose
-        if math.isfinite(scene._wall_contact(0., 0.)):
-            return None
         covered, blocked = set(), set()
         for key, (tx, ty) in scene.targets.items():
             u, v = c * (tx - x) + s * (ty - y), -s * (tx - x) + c * (ty - y)
-            if scene.collector.contains(u, v):
+            if scene.covers_pickup_center(u, v):
                 covered.add(key)
             if scene.safety_body.intersects_circle(u, v, scene.target_radius):
                 blocked.add(key)
         if covered:
-            return _Candidate(pose, frozenset(covered), frozenset(blocked))
+            # The connector still checks both swept footprints along each motion.
+            scene.pose = pose
+            if not math.isfinite(scene._wall_contact(0., 0.)):
+                return _Candidate(pose, frozenset(covered), frozenset(blocked))
         return None
 
     def _boundary_candidates(self, scene, candidates, deadline):
@@ -217,8 +221,12 @@ class StopsPlanner:
         # and the outer part of the collector's centre coverage.
         covered = set().union(*(candidate.covered - candidate.blocked for candidate in candidates))
         rect = scene.collector
-        lateral = (rect.ymin, (rect.ymin + rect.ymax) / 2, rect.ymax)
-        depths = (rect.xmax, rect.xmax - min(.003, (rect.xmax - rect.xmin) / 2))
+        margin = scene.pickup_margin_m
+        lateral = (rect.ymin + margin, (rect.ymin + rect.ymax) / 2, rect.ymax - margin)
+        far = rect.xmax - margin - (2 * EPS if margin else 0.)
+        depths = (far, far - min(.003, (far - rect.xmin - margin) / 2))
+        if margin:
+            lateral = (lateral[0] + 2 * EPS, lateral[1], lateral[2] - 2 * EPS)
         samples = getattr(rect, "pickup_samples", tuple((depth, offset) for depth in depths for offset in lateral))
         headings = max(360, self.options.headings)
         for key, (tx, ty) in scene.targets.items():
@@ -244,8 +252,12 @@ class StopsPlanner:
             for other in points[:i]:
                 if math.dist(point, other) <= diameter:
                     anchors.add(((point[0] + other[0]) / 2, (point[1] + other[1]) / 2))
-        near = max(scene.collector.xmin, scene.safety_body.xmax + scene.target_radius) + .015
-        far = scene.collector.xmax - .015
+        margin = scene.pickup_margin_m
+        inner_min = scene.collector.xmin + margin
+        inner_max = scene.collector.xmax - margin
+        padding = min(.015, max(0., inner_max - inner_min) / 4) if margin else .015
+        near = max(inner_min, scene.safety_body.xmax + scene.target_radius) + padding
+        far = inner_max - padding
         depths = sorted({far, (near + far) / 2, near})
         offset = (scene.collector.ymin + scene.collector.ymax) / 2
         samples = getattr(scene.collector, "pickup_samples", tuple((depth, offset) for depth in depths))
@@ -308,8 +320,12 @@ class StopsPlanner:
         pool = self._pool(root, pool_deadline, seed)
         stats["candidate_count"] = len(pool)
         # With no contact route to supply pickup poses, retain more approaches.
-        wide_search = seed is None
+        wide_search = seed is None or (root.pickup_margin_m > 0 and best is None)
         beam_width, approaches_per_batch, proposal_limit = (8, 20, 260) if wide_search else (4, 3, 64)
+        if wide_search and root.pickup_margin_m:
+            # Nearby stops can need a less direct first approach to leave
+            # an executable move to the second stop.
+            beam_width = 24
         fallback = None
         if self.options.ompl:
             from .ompl_motion import OmplMotion
@@ -394,7 +410,9 @@ class StopsPlanner:
                          or stats["expanded"] >= expansion_budget)
             status = "budget_exhausted" if exhausted else "not_found"
             stats["termination"] = status
-            return PlanResult(status, reason="No complete pickup plan satisfies the motion deadband",
+            reason = ("No complete pickup plan satisfies the pickup inset and motion deadband"
+                      if root.pickup_margin_m else "No complete pickup plan satisfies the motion deadband")
+            return PlanResult(status, reason=reason,
                               remaining=len(root.targets), optimization=stats,
                               elapsed=shared_elapsed + time.monotonic() - started,
                               trials=initial.trials + stats["trials"], expanded=initial.expanded + stats["expanded"])

@@ -138,6 +138,12 @@ class Scene:
         if self.pickup_rule not in ("contact", "center"):
             raise ValueError("Unsupported pickup_rule")
         custom["pickup_rule"] = self.pickup_rule
+        margin = custom.get("pickup_margin_m", 0.)
+        if isinstance(margin, bool):
+            raise ValueError("pickup_margin_m must be a nonnegative finite number")
+        self.pickup_margin_m = finite(margin)
+        if self.pickup_margin_m < 0:
+            raise ValueError("pickup_margin_m must be nonnegative")
         self.width, self.height = finite(world["width"]), finite(world["height"])
         self.fence_enabled = custom.get("fence_enabled", True)
         if not isinstance(self.fence_enabled, bool):
@@ -265,6 +271,16 @@ class Scene:
         # disk radius is still used, independently, for every body collision.
         return 0. if self.pickup_rule == "center" else self.target_radius
 
+    def covers_pickup_center(self, x: float, y: float) -> bool:
+        """Test a target centre in the vehicle frame against the pickup inset."""
+        tool = self.collector
+        margin = self.pickup_margin_m
+        if not margin:
+            return tool.contains(x, y)
+        if min(x - tool.xmin, tool.xmax - x, y - tool.ymin, tool.ymax - y) <= margin + EPS:
+            return False
+        return not isinstance(tool, PolygonFootprint) or tool.polygon.contains_disk(x, y, margin)
+
     @property
     def target_groups(self) -> tuple[tuple[int, ...], ...]:
         """Connected overlapping disks form one atomic collection task.
@@ -299,8 +315,9 @@ class Scene:
 
     def _collect_at_pose(self) -> None:
         if self.pickup_rule == "center":
+            covers = self.covers_pickup_center if self.collection_mode == "at_stop" else self.collector.contains
             for key, point in list(self.targets.items()):
-                if self.collector.contains(*self.local_point(*point)):
+                if covers(*self.local_point(*point)):
                     self.collected[key] = self.targets.pop(key)
             return
         for group in self.target_groups:

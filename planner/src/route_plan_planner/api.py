@@ -1,7 +1,7 @@
 """Public, headless request/response API, independent of viewer configuration."""
 
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 import math
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -24,6 +24,7 @@ from .records import describe_scene
 TargetId = str | int
 Pose = tuple[float, float, float]
 DEFAULT_AUTO_FENCE_RADIUS_M = 1.4
+DEFAULT_PICKUP_MARGIN_M = .03
 
 
 def _number(value, name):
@@ -72,6 +73,7 @@ class PlanningRequest:
     map_offset: tuple[float, float] = (0., 0.)
     mode: str = "standard"
     auto_fence_radius_m: float = DEFAULT_AUTO_FENCE_RADIUS_M
+    pickup_margin_m: float | None = None
 
     def __post_init__(self):
         if self.mode not in ("standard", "auto_fence"):
@@ -80,6 +82,11 @@ class PlanningRequest:
         if radius <= 0.:
             raise ValueError("auto_fence_radius_m must be positive")
         object.__setattr__(self, "auto_fence_radius_m", radius)
+        if self.pickup_margin_m is not None:
+            margin = _number(self.pickup_margin_m, "pickup_margin_m")
+            if margin < 0.:
+                raise ValueError("pickup_margin_m must be nonnegative")
+            object.__setattr__(self, "pickup_margin_m", margin)
         if not isinstance(self.fence_enabled, bool):
             raise ValueError("fence_enabled must be boolean")
         fence_span = None
@@ -150,6 +157,7 @@ class PlanningRequest:
             "pose": scene.pose, "targets": [{"id": key, "x": x, "y": y} for key, (x, y) in scene.targets.items()],
             "target_diameter": scene.target_diameter, "robot_config": record["vehicle_config"],
             "fence": custom.get("fence"), "fence_enabled": scene.fence_enabled, "seed": scene.seed,
+            "pickup_margin_m": scene.pickup_margin_m,
             **options,
         })
 
@@ -183,6 +191,8 @@ class PlanningRequest:
             del result["mode"]
             if self.auto_fence_radius_m == DEFAULT_AUTO_FENCE_RADIUS_M:
                 del result["auto_fence_radius_m"]
+        if self.pickup_margin_m is None:
+            del result["pickup_margin_m"]
         if isinstance(self.robot_config, Path):
             result["robot_config"] = str(self.robot_config)
         return result
@@ -257,6 +267,8 @@ def _empty_scene(request, *, extra_padding=0.):
              "custom": {"random_count": 0, "target_diameter": request.target_diameter,
                         "pickup_rule": "center" if request.method == "stops" else "contact",
                         "collection_mode": "at_stop" if request.method == "stops" else "contact"}}
+    if request.method == "stops" and request.pickup_margin_m is not None:
+        world["custom"]["pickup_margin_m"] = request.pickup_margin_m
     if not request.fence_enabled:
         world["custom"]["fence_enabled"] = False
     if request.fence is not None:
@@ -314,6 +326,8 @@ def plan(request: PlanningRequest | Mapping) -> PlanningResponse:
     """
     started = time.monotonic()
     request = request if isinstance(request, PlanningRequest) else PlanningRequest.from_dict(request)
+    if request.method == "stops" and request.pickup_margin_m is None:
+        request = replace(request, pickup_margin_m=DEFAULT_PICKUP_MARGIN_M)
     scene, id_map, profile = _scene(request, allow_safety_intrusions=request.method == "stops")
     initially_collected = [id_map[key] for key in scene.collected]
     options = PlannerOptions(timeout=request.timeout, ompl=request.use_ompl, seed=request.seed)

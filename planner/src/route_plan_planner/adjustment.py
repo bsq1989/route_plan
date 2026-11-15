@@ -74,14 +74,15 @@ def _candidate_poses(scene, points, origin, limit, deadline):
     bearing = math.atan2(sum(dy for _, dy in offsets), sum(dx for dx, _ in offsets))
     headings = (yaw, bearing, *(normalize(yaw + i * math.tau / 72) for i in range(1, 72)))
     box = scene.collector
+    margin = scene.pickup_margin_m
     poses = {}
     for angle in headings:
         if time.monotonic() >= deadline:
             break
         c, s = math.cos(angle), math.sin(angle)
         u, v = zip(*((c * dx + s * dy, -s * dx + c * dy) for dx, dy in offsets))
-        left, right = max(u) - box.xmax, min(u) - box.xmin
-        bottom, top = max(v) - box.ymax, min(v) - box.ymin
+        left, right = max(u) - box.xmax + margin, min(u) - box.xmin - margin
+        bottom, top = max(v) - box.ymax + margin, min(v) - box.ymin - margin
         if left > right or bottom > top:
             continue
         offsets_in_heading = [(a, b) for a in _offsets(left, right) for b in _offsets(bottom, top)]
@@ -90,7 +91,8 @@ def _candidate_poses(scene, points, origin, limit, deadline):
             mid_u, mid_v = (min(u) + max(u)) / 2, (min(v) + max(v)) / 2
             offsets_in_heading.extend((mid_u - a, mid_v - b) for a, b in samples)
         for a, b in offsets_in_heading:
-            if samples is not None and not all(box.contains(p - a, q - b) for p, q in zip(u, v)):
+            if (samples is not None or margin) and not all(
+                    scene.covers_pickup_center(p - a, q - b) for p, q in zip(u, v)):
                 continue
             distance = math.hypot(a, b)
             dx, dy = c * a - s * b, s * a + c * b

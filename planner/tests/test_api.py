@@ -99,7 +99,8 @@ class PublicApiTest(unittest.TestCase):
         path = Path(__file__).resolve().parents[2] / "sim/tests/fixtures/robot-rectangular.yaml"
         profile = yaml.safe_load(path.read_text())
         profile["collector"]["gap"] = .25
-        request = self.request(method="stops", robot_config=profile, targets=[Target("item", 3.67, 4.5)])
+        request = self.request(method="stops", pickup_margin_m=0., robot_config=profile,
+                               targets=[Target("item", 3.67, 4.5)])
         result = plan(request)
         self.assertTrue(result.success, result.reason)
         self.assertEqual(result.goals, [request.pose])
@@ -108,7 +109,8 @@ class PublicApiTest(unittest.TestCase):
         self.assertEqual(plan(result.resolved_request).goals, result.goals)
 
         del profile["collector"]["gap"]
-        fallback = plan(self.request(method="stops", robot_config=profile, targets=request.targets))
+        fallback = plan(self.request(method="stops", pickup_margin_m=0., robot_config=profile,
+                                     targets=request.targets))
         self.assertTrue(fallback.success, fallback.reason)
         self.assertEqual(fallback.resolved_request["robot_config"]["collector"]["gap"], .05)
         self.assertGreater(fallback.length, 0.)

@@ -7,6 +7,8 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+import yaml
+
 from route_plan_sim import Scene
 from route_plan_planner import PlannerOptions, StaticPlanner, StopsPlanner, plan
 from route_plan_planner.core import PlanResult
@@ -144,7 +146,7 @@ class PickupStopsTest(unittest.TestCase):
 
     def test_api_returns_portable_stop_checkpoints_and_all_original_ids(self):
         request = dict(width=12, height=9, pose=[3, 4.5, 0], method="stops", timeout=1, use_ompl=False,
-                       robot_config=PREVIOUS_ROBOT,
+                       robot_config=PREVIOUS_ROBOT, pickup_margin_m=0.,
                        targets=[dict(id="a", x=5, y=4.35), dict(id=205, x=5.1, y=4.5),
                                 dict(id="c", x=5.2, y=4.65)])
         result = plan(request)
@@ -213,6 +215,27 @@ class PickupStopsTest(unittest.TestCase):
         probe.pose = result.pickup_stops[0].pose
         for target in targets:
             self.assertTrue(probe.collector.contains(*probe.local_point(target["x"], target["y"])))
+
+    def test_pickup_inset_splits_unfit_batch_with_both_fences_enabled(self):
+        robot = yaml.safe_load(PREVIOUS_ROBOT.read_text())
+        robot["collector"].update(width=.19, depth=.09, gap=.183)
+        targets = [dict(id="a", x=4.2, y=4.425), dict(id="b", x=4.2, y=4.575)]
+        request = dict(pose=[3, 4.5, 0], targets=targets, method="stops", robot_config=robot,
+                       fence=[[2, 3], [5, 3], [5, 6], [2, 6]], mode="auto_fence",
+                       timeout=2., use_ompl=False)
+        nominal = plan(dict(request, pickup_margin_m=0.))
+        self.assertTrue(nominal.success, nominal.reason)
+        self.assertEqual(nominal.stop_count, 1)
+        self.assertEqual(nominal.resolved_request["pickup_margin_m"], 0.)
+        inset = plan(request)
+        self.assertTrue(inset.success, inset.reason)
+        self.assertEqual(inset.stop_count, 2)
+        self.assertCountEqual(inset.expected_collected_ids, ("a", "b"))
+        self.assertEqual(inset.resolved_request["pickup_margin_m"], .03)
+        self.assertEqual(inset.resolved_request["robot_config"]["collector"], robot["collector"])
+        impossible = plan(dict(request, pickup_margin_m=.05))
+        self.assertFalse(impossible.success)
+        self.assertEqual(impossible.goals, [])
 
     def test_center_inside_is_enough_without_containing_the_entire_disk(self):
         scene = at_stop_scene(self.scene([]))
