@@ -13,6 +13,7 @@ from route_plan_planner import PlannerOptions, StaticPlanner, replay
 from route_plan_planner.motion import Transition, steer
 from route_plan_planner.ompl_motion import OmplMotion
 from route_plan_planner.records import describe_scene, read_json, restore_scene, write_json
+from route_plan_planner.stops import at_stop_scene
 
 FIXTURES = Path(__file__).parent / "fixtures" / "static_cases.json"
 RECTANGULAR_ROBOT = Path(__file__).resolve().parents[2] / "sim/tests/fixtures/robot-rectangular.yaml"
@@ -88,8 +89,8 @@ class StaticBaselineTest(unittest.TestCase):
         self.assertEqual(len(scene.targets), 1)
 
     def test_swept_rotation_collision_is_not_accepted(self):
-        scene = self.empty()
-        scene.add_target(3, 5.025)
+        scene = at_stop_scene(self.empty())
+        scene.add_target(3, 4.99)
         self.assertIsNone(steer(scene, (3, 4.5, math.pi)))
         self.assertIsNone(scene.failure)
 

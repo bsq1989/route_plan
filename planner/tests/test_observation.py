@@ -26,7 +26,7 @@ class ObservationTests(unittest.TestCase):
         json.dumps(second, allow_nan=False)
 
     def test_coarse_intrusion_requires_independent_start_clearance(self):
-        coarse = [{"id": "side", "x": .20, "y": .45, "error_radius": .14}]
+        coarse = [{"id": "side", "x": .15, "y": .45, "error_radius": .14}]
         blocked = plan_observation_step(self.request, coarse)
         self.assertEqual(blocked.status, "blocked")
         self.assertFalse(blocked.goals)
@@ -36,6 +36,12 @@ class ObservationTests(unittest.TestCase):
         self.assertGreater(x, .05)
         self.assertAlmostEqual(y, 0.)
         self.assertAlmostEqual(yaw, 0.)
+
+    def test_clear_start_cannot_waive_a_new_sweep_at_the_chamfer(self):
+        coarse = [{"id": "side", "x": .20, "y": .45, "error_radius": .14}]
+        result = plan_observation_step(self.request, coarse, initial_clearance_confirmed=True)
+        self.assertEqual(result.status, "blocked")
+        self.assertFalse(result.goals)
 
     def test_confirmed_target_supersedes_coarse_hint_for_pickup(self):
         request = {**self.request, "targets": [{"id": "far", "x": .9, "y": 0.}]}

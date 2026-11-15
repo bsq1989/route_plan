@@ -59,6 +59,33 @@ class PickupStopsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             scene.collect_at_stop()
 
+    def test_default_union_covers_both_sides_from_one_stop(self):
+        result = plan(dict(pose=[0., 0., 0.], mode="auto_fence", method="stops",
+                           targets=[dict(id="left", x=.50, y=.31), dict(id="right", x=.50, y=-.31)],
+                           use_ompl=False))
+        self.assertTrue(result.success, result.reason)
+        self.assertEqual(result.goals, [(0., 0., 0.)])
+        self.assertEqual(result.stop_count, 1)
+        self.assertCountEqual(result.pickup_stops[0].target_ids, ["left", "right"])
+
+    def test_default_union_does_not_collect_inside_safety_margin(self):
+        scene = at_stop_scene(Scene(scenario="empty"))
+        point = (.30, .38)
+        self.assertTrue(scene.collector.contains(*point))
+        self.assertFalse(scene.body.intersects_circle(*point, scene.target_radius))
+        self.assertTrue(scene.safety_body.intersects_circle(*point, scene.target_radius))
+        pose_x, pose_y, _ = scene.pose
+        scene.add_targets([(pose_x + point[0], pose_y + point[1])], allow_safety_intrusions=True)
+        with self.assertRaisesRegex(ValueError, "before clearing"):
+            scene.collect_at_stop()
+
+    def test_chamfer_allows_a_pickup_outside_the_swept_safety_body(self):
+        result = plan(dict(pose=[0., 0., 0.], mode="auto_fence", method="stops",
+                           targets=[dict(id="left", x=.37, y=.37)], use_ompl=False))
+        self.assertTrue(result.success, result.reason)
+        self.assertEqual(result.goals, [(0., 0., 0.)])
+        self.assertEqual(result.pickup_stops[0].target_ids, ("left",))
+
     def test_initial_tool_coverage_is_one_explicit_stop_not_zero(self):
         result = plan(dict(width=12, height=9, pose=[3, 4.5, 0],
                            targets=[dict(id="initial", x=3.55, y=4.5)], method="stops", timeout=.5))

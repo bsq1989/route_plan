@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field, replace
 import math
 from typing import Mapping
 
-from route_plan_sim.boundary import Fence
+from route_plan_sim.boundary import Fence, PolygonFootprint
 from route_plan_sim.scene import EPS, Rect, normalize
 
 from .api import PickupStop, PlanningRequest, Pose, Target, _empty_scene, _number, plan
@@ -78,6 +78,16 @@ def _local(pose, target):
 def _new_sweep_clear(body, x, y, radius, error, distance):
     # The starting footprint is independently certified clear. Bound the
     # newly swept area of its radius-offset front by horizontal slabs.
+    if isinstance(body, PolygonFootprint):
+        low = max(y - error, body.ymin - radius)
+        high = min(y + error, body.ymax + radius)
+        if low > high:
+            return True
+        origin = body.xmax + radius + .01
+        span = origin - body.xmin + radius + .01
+        entry = max(body.first_contact(origin, yy, span, 0., radius) for yy in (low, high))
+        # The right boundary of a convex offset is concave as a function of y.
+        return x + error <= origin - entry * span - EPS
     if x + error <= body.xmax - EPS:
         return True
     front = body.xmax + radius

@@ -53,9 +53,10 @@ def make_environment_from_config(config, bounds, display):
         **config["world"], "width": xmax - xmin, "height": ymax - ymin, "offset": [xmin, ymin],
     }}
     shape = config["robot"]["shape"]
-    if "body_front_x" in config["custom"]:
+    if "body_front_x" in config["custom"] or "body_polygon" in config["custom"]:
+        custom = config["custom"]
         config["robot"] = {**config["robot"], "shape": render_body_shape(
-            shape["length"], shape["width"], config["custom"]["body_front_x"]
+            shape["length"], shape["width"], custom.get("body_front_x"), custom.get("body_polygon")
         )}
     with TemporaryDirectory(prefix="route-plan-scene-") as directory:
         resolved = Path(directory) / "world.yaml"
@@ -63,7 +64,9 @@ def make_environment_from_config(config, bounds, display):
         return irsim.make(str(resolved), display=display, step_mode="external", log_level="ERROR")
 
 
-def render_body_shape(length, width, front=None):
+def render_body_shape(length, width, front=None, polygon=None):
+    if polygon is not None:
+        return {"name": "polygon", "vertices": polygon}
     if front is None:
         return {"name": "rectangle", "length": length, "width": width}
     rear, half = front - length, width / 2
@@ -404,8 +407,9 @@ class Viewer:
         if dimensions != self._rendered_dimensions:
             robot = self.env.robot
             robot.plot_clear(all=True)
-            front = self.scene.config["custom"].get("body_front_x")
-            robot.gf = GeometryFactory.create_geometry(**render_body_shape(*dimensions, front))
+            custom = self.scene.config["custom"]
+            robot.gf = GeometryFactory.create_geometry(**render_body_shape(
+                *dimensions, custom.get("body_front_x"), custom.get("body_polygon")))
             robot._init_geometry()
             robot.G, robot.h, robot.cone_type, robot.convex_flag = robot.gf.get_init_Gh()
             robot.info.G, robot.info.h = robot.G, robot.h

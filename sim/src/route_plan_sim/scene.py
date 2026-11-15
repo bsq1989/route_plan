@@ -187,10 +187,12 @@ class Scene:
         if robot["shape"]["name"] != "rectangle":
             raise ValueError("This scene requires a rectangular robot")
         self.body_pose_reference = custom["body_pose_reference"]
-        front = custom.get("body_front_x", length / 2)
+        footprint = custom.get("body_polygon")
+        front = max(point[0] for point in footprint) if footprint is not None else custom.get("body_front_x", length / 2)
         if not 0 < front < length:
             raise ValueError("Body front must put the pose reference inside the body")
-        self.body = Rect(front - length, -width / 2, front, width / 2)
+        self.body = (PolygonFootprint.from_points(footprint) if footprint is not None
+                     else Rect(front - length, -width / 2, front, width / 2))
         self.body_margin = finite(custom.get("body_margin", 0) if body_margin is None else body_margin)
         if self.body_margin < 0:
             raise ValueError("Body margin must be nonnegative")
@@ -340,8 +342,10 @@ class Scene:
         return tuple(key for key in self.collected if key not in before)
 
     @property
-    def safety_body(self) -> Rect:
+    def safety_body(self) -> Rect | PolygonFootprint:
         margin = self.body_margin
+        if isinstance(self.body, PolygonFootprint):
+            return self.body.outward_offset(margin)
         return Rect(self.body.xmin - margin, self.body.ymin - margin,
                     self.body.xmax + margin, self.body.ymax + margin)
 
@@ -375,10 +379,16 @@ class Scene:
         margin = self.body_margin if body_margin is None else finite(body_margin)
         if margin < 0:
             raise ValueError("Body margin must be nonnegative")
-        front = self.body.xmax if self.body_pose_reference == "base_link" else length / 2
+        if isinstance(self.body, PolygonFootprint):
+            if (abs(length - self.dimensions["body_length"]) > 1e-6
+                    or abs(width - self.dimensions["body_width"]) > 1e-6):
+                raise ValueError("Edit body polygon vertices in the vehicle configuration")
+            front, body = self.body.xmax, self.body
+        else:
+            front = self.body.xmax if self.body_pose_reference == "base_link" else length / 2
+            body = Rect(front - length, -width / 2, front, width / 2)
         if front >= length:
             raise ValueError("Body front must put the pose reference inside the body")
-        body = Rect(front - length, -width / 2, front, width / 2)
         gap = margin if self._gap_follows_margin else self.collector_gap
         if isinstance(self.collector, PolygonFootprint):
             if abs(cw - self.dimensions["collector_width"]) > 1e-6 or abs(depth - self.dimensions["collector_depth"]) > 1e-6:
@@ -587,9 +597,15 @@ class Scene:
         exit_distance = radius * math.sqrt(max(0., 1. - radial_fraction * radial_fraction)) - along
         return max(0., min(1., exit_distance / distance))
 
+    def _forward_can_escape(self, x, y):
+        if isinstance(self.body, PolygonFootprint):
+            return (self.body.forward_preserves_clearance(x, y)
+                    and self.safety_body.forward_preserves_clearance(x, y))
+        return x <= self.body.xmax
+
     def _initial_intrusion_contact(self, x, y, distance, rotation):
         """Allow an initially overlapping disk only while moving away from it."""
-        if distance and x > self.body.xmax:
+        if distance and not self._forward_can_escape(x, y):
             return 0.
         if rotation and (not self.body.turn_preserves_clearance(x, y, rotation)
                          or not self.safety_body.turn_preserves_clearance(x, y, rotation, self.target_radius + EPS)):

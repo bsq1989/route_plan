@@ -40,13 +40,20 @@ def load_config(world_path: Path, robot_path: str | Path | None = None) -> tuple
         reference = body["pose_reference"]
         if reference not in ("body_center", "base_link") or body["rotation_center"] != reference:
             raise ValueError("车体位姿参考点须与旋转中心一致")
+        body_polygon = PolygonFootprint.from_points(body["polygon"]) if "polygon" in body else None
+        if body_polygon is not None:
+            body_polygon.outward_offset(0.)
+            if not body_polygon.polygon.contains_disk(0., 0.):
+                raise ValueError("Body polygon must contain the pose reference in its interior")
         polygon = PolygonFootprint.from_points(collector["polygon"]) if "polygon" in collector else None
-        raw = {"body_length": body["length"], "body_width": body["width"],
+        length = body["length"] if body_polygon is None else body_polygon.xmax - body_polygon.xmin
+        width = body["width"] if body_polygon is None else body_polygon.ymax - body_polygon.ymin
+        raw = {"body_length": length, "body_width": width,
                "body_margin": profile["safety"]["body_margin"],
                "forward_speed": profile["motion"]["forward_speed"],
                "angular_speed": profile["motion"]["angular_speed"]}
         if reference == "base_link":
-            raw["body_front_x"] = body["front_x"]
+            raw["body_front_x"] = body["front_x"] if body_polygon is None else body_polygon.xmax
         if polygon is None:
             raw.update(collector_width=collector["width"], collector_depth=collector["depth"],
                        collector_offset=collector.get("lateral_offset", 0))
@@ -71,6 +78,10 @@ def load_config(world_path: Path, robot_path: str | Path | None = None) -> tuple
     robot["shape"] = {"name": "rectangle", "length": values["body_length"], "width": values["body_width"]}
     custom = merged.setdefault("custom", {})
     custom["body_pose_reference"] = reference
+    if body_polygon is None:
+        custom.pop("body_polygon", None)
+    else:
+        custom["body_polygon"] = body_polygon.corners
     if reference == "base_link":
         custom["body_front_x"] = values["body_front_x"]
     else:

@@ -17,6 +17,8 @@ def describe_scene(scene: Scene) -> dict:
             "pose_reference": scene.body_pose_reference, "rotation_center": scene.body_pose_reference}
     if scene.body_pose_reference == "base_link":
         body["front_x"] = scene.body.xmax
+    if "body_polygon" in custom:
+        body["polygon"] = scene.body.corners
     if "body_height" in custom:
         body["height"] = custom["body_height"]
     return {
@@ -82,6 +84,10 @@ def restore_scene(record: dict, *, allow_safety_intrusions: bool = False) -> Sce
     scene.config = deepcopy(record["world_config"])
     scene.config["custom"]["collector"] = collector
     scene.config["custom"]["body_pose_reference"] = scene.body_pose_reference
+    if "polygon" in record["vehicle_config"]["body"]:
+        scene.config["custom"]["body_polygon"] = scene.body.corners
+    else:
+        scene.config["custom"].pop("body_polygon", None)
     if scene.body_pose_reference == "base_link":
         scene.config["custom"]["body_front_x"] = scene.body.xmax
     else:

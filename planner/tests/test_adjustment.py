@@ -50,7 +50,7 @@ class PickupAdjustmentTest(unittest.TestCase):
     def test_polygon_adjustment_prefers_clear_stop_with_in_place_turn(self):
         request = dict(pose=(0., 0., 0.), mode="auto_fence", timeout=1.,
                        fence=[[-1, -1], [1.5, -1], [1.5, 1.5], [-1, 1.5]],
-                       targets=[dict(id="item", x=.45, y=.39), dict(id="neighbor", x=1.1, y=-.4)])
+                       targets=[dict(id="item", x=.35, y=-.46), dict(id="neighbor", x=1.1, y=-.4)])
         result = plan_pickup_adjustment(request, ["item"], max_displacement=0.)
         self.verify(result, ["item"], ["neighbor"], limit=0.)
         self.assertGreaterEqual(result.metrics["min_pickup_clearance_m"], .03)
@@ -83,7 +83,7 @@ class PickupAdjustmentTest(unittest.TestCase):
                 self.assertFalse(result.pickup_stops)
 
     def test_recovery_clears_safety_overlap_before_pickup(self):
-        request = dict(pose=(0., 0., 0.), timeout=.5, targets=[dict(id="item", x=.37, y=.37)])
+        request = dict(pose=(0., 0., 0.), timeout=.5, targets=[dict(id="item", x=.26, y=.36)])
         result = plan_pickup_adjustment(request, ["item"])
         self.assertTrue(result.success, result.reason)
         self.assertEqual(result.expected_collected_ids, ["item"])

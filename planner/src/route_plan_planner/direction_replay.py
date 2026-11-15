@@ -2,8 +2,17 @@
 
 import json
 
+from route_plan_sim.boundary import PolygonFootprint
+
 
 def write_replay(path, record):
+    custom = record["scene_config"]["custom"]
+    if "body_polygon" in custom:
+        old_config = record["scene_config"]
+        body = PolygonFootprint.from_points(custom["body_polygon"])
+        safety = body.outward_offset(record["initial"]["dimensions"]["body_margin"])
+        record = {**record, "scene_config": {**old_config,
+                  "custom": {**custom, "safety_polygon": safety.corners}}}
     encoded = json.dumps(record, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
     path.write_text(PAGE.replace("__RECORD__", encoded), encoding="utf-8")
 
@@ -144,11 +153,16 @@ function render(){
   }
   const l=dims.body_length/2,w=dims.body_width/2,m=dims.body_margin,col=custom.collector;
   const front=custom.body_front_x??l, rear=front-2*l;
-  ctx.setLineDash([5,4]);rect(frame.pose,rear-m,-w-m,front+m,w+m,null,"#b3582d");ctx.setLineDash([]);
-  rect(frame.pose,rear,-w,front,w,"#1b4f50","#fff");
+  const c=Math.cos(yaw),s=Math.sin(yaw);
+  const footprint=(points,fill,stroke)=>path(points.map(([u,v])=>[x+c*u-s*v,y+s*u+c*v]),fill,stroke);
+  ctx.setLineDash([5,4]);
+  if(custom.safety_polygon) footprint(custom.safety_polygon,null,"#b3582d");
+  else rect(frame.pose,rear-m,-w-m,front+m,w+m,null,"#b3582d");
+  ctx.setLineDash([]);
+  if(custom.body_polygon) footprint(custom.body_polygon,"#1b4f50","#fff");
+  else rect(frame.pose,rear,-w,front,w,"#1b4f50","#fff");
   if(col.polygon){
-    const c=Math.cos(yaw),s=Math.sin(yaw);
-    path(col.polygon.map(([u,v])=>[x+c*u-s*v,y+s*u+c*v]),"#167e66","#fff");
+    footprint(col.polygon,"#167e66","#fff");
   }else{
     rect(frame.pose,front+col.gap,col.lateral_offset-col.width/2,front+col.gap+col.depth,col.lateral_offset+col.width/2,"#167e66","#fff");
   }

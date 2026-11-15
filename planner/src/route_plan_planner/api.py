@@ -299,7 +299,10 @@ def _workspace_padding(profile, diameter, extra):
     try:
         body, collector = profile["body"], profile["collector"]
         margin = profile["safety"]["body_margin"]
-        extents = (body["length"], body["width"], margin)
+        if "polygon" in body:
+            extents = (max(math.hypot(*map(float, point)) for point in body["polygon"]), margin)
+        else:
+            extents = (body["length"], body["width"], margin)
         if "polygon" in collector:
             extents += (max(math.hypot(*map(float, point)) for point in collector["polygon"]),)
         else:

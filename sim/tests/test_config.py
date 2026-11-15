@@ -27,24 +27,26 @@ class RobotConfigTest(unittest.TestCase):
 
     def test_real_robot_is_the_default_for_each_new_episode(self):
         scene = Scene()
-        for key, expected in dict(body_length=.702, body_width=.610, collector_width=.466427,
-                                  collector_depth=.247522, body_margin=.050).items():
+        for key, expected in dict(body_length=.705, body_width=.580, collector_width=.962119,
+                                  collector_depth=.408606, body_margin=.050).items():
             self.assertAlmostEqual(scene.dimensions[key], expected)
         self.assertAlmostEqual(scene.config["custom"]["body_height"], .169)
         self.assertEqual(scene.body_pose_reference, "base_link")
-        self.assertAlmostEqual(scene.body.xmax, .341)
-        self.assertAlmostEqual(scene.body.xmin, -.361)
-        self.assertAlmostEqual(scene.collector_gap, .059531)
-        self.assertEqual(len(scene.collector.corners), 241)
-        self.assertTrue(scene.collector.contains(.56, .14))
+        self.assertAlmostEqual(scene.body.xmax, .342)
+        self.assertAlmostEqual(scene.body.xmin, -.363)
+        self.assertEqual(len(scene.body.corners), 8)
+        self.assertAlmostEqual(scene.collector_gap, -.102553)
+        self.assertEqual(len(scene.collector.corners), 522)
+        self.assertTrue(scene.collector.contains(.50, .31))
+        self.assertTrue(scene.collector.contains(.50, -.31))
         self.assertFalse(scene.collector.contains(.43, 0))
-        self.assertAlmostEqual(scene.safety_body.xmax - scene.safety_body.xmin, .802)
-        self.assertAlmostEqual(scene.safety_body.ymax - scene.safety_body.ymin, .710)
-        scene.set_dimensions(**(scene.dimensions | {"body_length": .7}))
-        self.assertAlmostEqual(Scene().dimensions["body_length"], .702)
+        self.assertAlmostEqual(scene.safety_body.xmax - scene.safety_body.xmin, .805)
+        self.assertAlmostEqual(scene.safety_body.ymax - scene.safety_body.ymin, .680)
+        with self.assertRaisesRegex(ValueError, "Edit body polygon vertices"):
+            scene.set_dimensions(**(scene.dimensions | {"body_length": .7}))
 
     def test_default_does_not_depend_on_working_directory(self):
-        code = "from route_plan_sim import Scene; s=Scene(); assert s.dimensions['body_length']==0.702; print('ok')"
+        code = "from route_plan_sim import Scene; assert len(Scene().body.corners)==8; print('ok')"
         result = subprocess.run([sys.executable, "-c", code], cwd=self.folder,
                                 check=True, capture_output=True, text=True)
         self.assertEqual(result.stdout.strip(), "ok")

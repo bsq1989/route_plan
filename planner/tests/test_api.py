@@ -13,7 +13,7 @@ from route_plan_planner.motion import replay
 class PublicApiTest(unittest.TestCase):
     def test_stops_recovers_from_initial_safety_intrusion_before_pickups(self):
         request = dict(width=12, height=9, pose=(3., 4.5, 0.), method="stops", use_ompl=False, timeout=1.,
-                       targets=[dict(id="far", x=3.5351, y=5.1225), dict(id=42, x=3.3792, y=4.8929)])
+                       targets=[dict(id="far", x=3.5351, y=5.1225), dict(id=42, x=3.26, y=4.86)])
         result = plan(request)
         self.assertTrue(result.success, result.reason)
         count = result.metrics["escape_goal_count"]
@@ -77,10 +77,11 @@ class PublicApiTest(unittest.TestCase):
         decoded = json.loads(json.dumps(result.to_dict(), allow_nan=False))
         self.assertTrue(decoded["success"])
         profile = decoded["resolved_request"]["robot_config"]
-        self.assertEqual(len(profile["collector"]["polygon"]), 241)
+        self.assertEqual(len(profile["collector"]["polygon"]), 522)
         self.assertEqual(profile["body"]["pose_reference"], "base_link")
-        self.assertEqual(profile["body"]["front_x"], .341)
+        self.assertEqual(profile["body"]["front_x"], .342)
         self.assertEqual(profile["body"]["height"], .169)
+        self.assertEqual(len(profile["body"]["polygon"]), 8)
         repeated = plan(decoded["resolved_request"])
         self.assertTrue(repeated.success)
         self.assertEqual(set(repeated.expected_collected_ids), {"item-a", 205})

@@ -1,6 +1,6 @@
 # Route Plan 纯算法 SDK
 
-`route-plan-sdk 0.2.17`，Python 导入名为 `route_plan_sdk`。输入场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。提供有状态的 `CoveragePolicy`，用于由 Gateway 执行远近观测和拾取动作。
+`route-plan-sdk 0.2.18`，Python 导入名为 `route_plan_sdk`。输入场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。提供有状态的 `CoveragePolicy`，用于由 Gateway 执行远近观测和拾取动作。
 
 包内包含任务规划、路径长度优化与必要的私有几何校验内核。没有 IR-SIM、窗口、绘图、动画、场景演示、ROS 或实车控制功能。无需原仓库目录或 `PYTHONPATH`，默认车型文件已随包携带。
 
@@ -29,10 +29,10 @@ source .venv/bin/activate
 python -m pip install .
 
 # 或安装提供的 SDK wheel，二者任选一个
-python -m pip install /完整路径/route_plan_sdk-0.2.17-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.18-py3-none-any.whl
 ```
 
-源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.17`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
+源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.18`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
 
 ## 最小 Python 调用
 
@@ -249,7 +249,7 @@ else:
 - `method`：`feasibility`、`length` 或 `stops`，默认 `length`。实车停靠模式显式传 `method="stops"`。在全部清除且无碰撞的前提下，此模式优化拾取停靠次数，路程作为结果统计。每段实际平移大于 5 cm，每次实际转向大于 1°，包含平移前对准和到位后的末端转向。预算耗尽时返回已验证的可行路线（如果已找到）。运动死区是内置规则，无需增加输入字段。
 - `pickup_margin_m`：停靠拾取的内缩余量，单位米。调用 `plan(method="stops")` 时默认 `0.03`，要求每个批次目标的圆心在消除区内，且距原边界大于 3 cm。显式传 `0` 可使用原边界。矩形和多边形均支持。局部修正也可传入此参数，省略时使用原边界。如果一个位姿无法覆盖整批目标，停靠规划会继续搜索多个位姿。若找不到满足余量的完整路线，返回失败和空路线。余量只用于判定拾取覆盖，碰撞、场地 fence 和 auto fence 沿用各自原有几何。
 - `timeout`：搜索预算，默认 3 秒；包括取得可行初解的耗时，最终回放和响应整理可能增加调用总耗时。
-- `robot_config`：可选车辆 YAML 路径或完整配置字典，省略时使用随包默认车型。默认车身长宽高为 0.702/0.610/0.169 米，高度仅作记录。每侧安全外扩 0.050 米。默认 `body.pose_reference` 和 `body.rotation_center` 为 `base_link`，`body.front_x` 为 0.341 米。`collector.polygon` 使用该参考系下的米制 `[[x, y], ...]` 顶点，支持单个无孔的凹多边形。旧车型仍可传 `body_center` 位姿参考和矩形消除区，矩形的 `gap` 省略时沿用 `body_margin`。响应的 `resolved_request.robot_config` 返回实际车型。
+- `robot_config`：可选车辆 YAML 路径或完整配置字典，省略时使用随包默认车型。默认底盘是外接长宽 0.705 × 0.580 米的倒角八边形，车高 0.169 米。每条底盘边外移 0.050 米形成安全轮廓。默认 `body.pose_reference` 和 `body.rotation_center` 为 `base_link`，`body.front_x` 为 0.342 米。`body.polygon` 与 `collector.polygon` 使用该参考系下的米制 `[[x, y], ...]` 顶点。底盘使用凸多边形，消除区可使用单个无孔的凹多边形。省略底盘顶点时使用矩形。默认消除区为 D405 左、中、右观察位的地面并集，执行端需在同一停车位检查对应观察位，再按实测结果确认每件拾取。旧车型仍可传 `body_center` 位姿参考和矩形消除区，矩形的 `gap` 省略时沿用 `body_margin`。响应的 `resolved_request.robot_config` 返回实际车型。
 - `request_id / frame_id`：可选关联标识，随响应返回；`frame_id` 默认 `map`，仅作标识，不执行坐标变换。
 - `use_ompl / seed`：是否使用 RRT 回退及随机种子。OMPL 在每个进程第一次使用时初始化随机流，同进程后续调用沿用该流，不承诺重新搜索逐位复现。
 
@@ -263,7 +263,7 @@ else:
 
 旧接触模式仍按重叠连通组清除，保留原始 ID。`stops` 模式逐 ID 检查圆心；彼此重叠的多个目标可以同时拾取，但区域外的圆心不能因为重叠关系被顺带清除，必要时分批处理。所有未清除圆都参与碰撞检查，不能用质心替代整组碰撞范围。
 
-车身四周（包括正前方）的 `body_margin` 区域统一参与连续碰撞检查，圆与安全矩形接触即失败，不能因位于消除器方向而豁免；转动是否可行也由完整扫掠过程判断。不另增加“只能前进拾取”的独立规则。
+车身四周（包括正前方）的 `body_margin` 区域统一参与连续碰撞检查，圆与安全轮廓接触即失败，不能因位于消除器方向而豁免；转动是否可行也由完整扫掠过程判断。不另增加“只能前进拾取”的独立规则。
 
 ## 输出约定
 

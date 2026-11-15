@@ -5,6 +5,7 @@ import math
 import time
 from typing import Mapping
 
+from route_plan_sim.boundary import PolygonFootprint
 from route_plan_sim.scene import EPS, normalize
 
 from .api import PlanningRequest, Pose, TargetId, _empty_scene
@@ -43,15 +44,26 @@ def _forward_exit(scene, points, initial_intrusions, *, minimum_translation=0., 
     local = [scene.local_point(*point) for point in points]
     # Forward motion decreases local x. Even an intrusion cleared by the
     # preceding turn must keep its body clearance for the whole escape.
-    if any(local[i][0] > body.xmax for i in initial_intrusions):
+    if any(not scene._forward_can_escape(*local[i]) for i in initial_intrusions):
         return None
     intrusions = {i for i in initial_intrusions if safety.intersects_circle(*local[i], radius)}
     exit_distance = 0.
     for i in intrusions:
         x, y = local[i]
-        dy = max(safety.ymin - y, 0., y - safety.ymax)
-        reach = math.sqrt(max(0., (radius + EPS)**2 - dy**2))
-        exit_distance = max(exit_distance, x - safety.xmin + reach)
+        if isinstance(safety, PolygonFootprint):
+            lo, hi = 0., x - safety.xmin + radius + .01
+            # Along this ray, a convex polygon plus a disk can only be left once.
+            for _ in range(40):
+                middle = (lo + hi) / 2
+                if safety.intersects_circle(x - middle, y, radius):
+                    lo = middle
+                else:
+                    hi = middle
+            exit_distance = max(exit_distance, hi)
+        else:
+            dy = max(safety.ymin - y, 0., y - safety.ymax)
+            reach = math.sqrt(max(0., (radius + EPS)**2 - dy**2))
+            exit_distance = max(exit_distance, x - safety.xmin + reach)
 
     # Prefer a centimetre past clearance. Use a shorter move if another
     # obstacle or the map boundary limits the available space.

@@ -144,6 +144,11 @@ class Fence:
     def first_contact(self, rect, pose, distance=0., rotation=0.):
         x, y, yaw = pose
         c, s = math.cos(yaw), math.sin(yaw)
+        if isinstance(rect, PolygonFootprint):
+            half = distance / 2
+            # This disk encloses the whole sweep for a turn or straight move.
+            if self.contains_disk(x + half * c, y + half * s, rect.reach + half):
+                return math.inf
         corners = [(c * u - s * v, s * u + c * v) for u, v in rect.corners]
         u, v = corners[0]
         if not self.contains_disk(x + u, y + v):
@@ -236,6 +241,66 @@ class PolygonFootprint:
 
     def contains(self, x, y):
         return self.intersects_circle(x, y, 0.)
+
+    @lru_cache(maxsize=16)
+    def outward_offset(self, margin):
+        """Offset every face of a convex footprint by a perpendicular margin."""
+        edges = self.polygon.edges
+        turns = [a.direction[0] * b.direction[1] - a.direction[1] * b.direction[0]
+                 for a, b in zip(edges, (*edges[1:], edges[0]))]
+        winding = 1 if turns[0] > 0 else -1
+        if any(turn * winding <= EPS for turn in turns):
+            raise ValueError("Body polygon must be strictly convex")
+        if not margin:
+            return self
+        normals = [(winding * uy, -winding * ux) for ux, uy in (edge.direction for edge in edges)]
+        points = []
+        for index, (x, y) in enumerate(self.corners):
+            ax, ay = normals[index - 1]
+            bx, by = normals[index]
+            scale = margin / (1 + ax * bx + ay * by)
+            points.append((x + scale * (ax + bx), y + scale * (ay + by)))
+        return self.from_points(points)
+
+    def turn_preserves_clearance(self, px, py, angle, contact_distance=None):
+        """Check distances at every closest-feature transition and extremum."""
+        times = {0., 1.}
+        for edge in self.polygon.edges:
+            ux, uy = edge.direction
+            ax, ay = edge.start
+            along, across = ux * px + uy * py, uy * px - ux * py
+            start_along = ux * ax + uy * ay
+            for projection in (start_along, start_along + edge.length):
+                times.update(trig_times(along, -across, projection, angle))
+            times.update(trig_times(across, along, uy * ax - ux * ay, angle))
+            times.update(trig_times(along, -across, 0., angle))
+            times.update(trig_times(ax * py - ay * px, -ax * px - ay * py, 0., angle))
+        largest = 0.
+        for t in sorted(times):
+            c, s = math.cos(angle * t), math.sin(angle * t)
+            point = c * px + s * py, -s * px + c * py
+            distance = (0. if self.contains(*point) else
+                        min(edge.distance(point) for edge in self.polygon.edges))
+            if distance + EPS < largest:
+                return False
+            if contact_distance is not None and distance <= contact_distance < largest:
+                return False
+            largest = max(distance, largest)
+        return True
+
+    def forward_preserves_clearance(self, x, y):
+        """Moving the vehicle forward moves a local point along negative x."""
+        if self.contains(x, y):
+            return True
+        distance, closest_x = math.inf, 0.
+        for edge in self.polygon.edges:
+            along, across = edge.project(x, y)
+            clipped = min(edge.length, max(0., along))
+            gap = math.hypot(along - clipped, across)
+            if gap < distance:
+                distance = gap
+                closest_x = edge.start[0] + clipped * edge.direction[0]
+        return x <= closest_x + EPS
 
     def longitudinal_spans(self, y):
         """Closed forward-axis intervals inside the polygon at lateral offset y."""

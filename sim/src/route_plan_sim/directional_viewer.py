@@ -11,6 +11,7 @@ from matplotlib.patches import Circle, Patch, Polygon, Wedge
 from matplotlib.widgets import Button, Slider
 
 from .app import configure_chinese_font, disable_environment_keyboard, make_environment_from_config
+from .boundary import PolygonFootprint
 from .drawing import TargetCircles
 from .scene import Rect
 
@@ -86,7 +87,10 @@ class DirectionalViewer:
         hx, hy = dims["body_length"] / 2, dims["body_width"] / 2
         m = dims["body_margin"]
         front = custom.get("body_front_x", hx)
-        self.safety_points = Rect(front - 2 * hx - m, -hy - m, front + m, hy + m).corners
+        if "body_polygon" in custom:
+            self.safety_points = PolygonFootprint.from_points(custom["body_polygon"]).outward_offset(m).corners
+        else:
+            self.safety_points = Rect(front - 2 * hx - m, -hy - m, front + m, hy + m).corners
         if "polygon" in tool:
             self.collector_points = tool["polygon"]
         else:
