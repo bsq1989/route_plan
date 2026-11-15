@@ -287,8 +287,12 @@ def _workspace_padding(profile, diameter, extra):
     try:
         body, collector = profile["body"], profile["collector"]
         margin = profile["safety"]["body_margin"]
-        extents = (body["length"], body["width"], margin, collector["width"], collector["depth"],
-                   collector.get("gap", margin), collector.get("lateral_offset", 0.))
+        extents = (body["length"], body["width"], margin)
+        if "polygon" in collector:
+            extents += (max(math.hypot(*map(float, point)) for point in collector["polygon"]),)
+        else:
+            extents += (collector["width"], collector["depth"],
+                        collector.get("gap", margin), collector.get("lateral_offset", 0.))
     except (AttributeError, KeyError, TypeError) as error:
         raise ValueError("Invalid robot_config geometry") from error
     return 1. + extra + diameter + sum(abs(_number(value, "robot dimension")) for value in extents)

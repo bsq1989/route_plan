@@ -52,10 +52,22 @@ def make_environment_from_config(config, bounds, display):
     config = {**config, "world": {
         **config["world"], "width": xmax - xmin, "height": ymax - ymin, "offset": [xmin, ymin],
     }}
+    shape = config["robot"]["shape"]
+    if "body_front_x" in config["custom"]:
+        config["robot"] = {**config["robot"], "shape": render_body_shape(
+            shape["length"], shape["width"], config["custom"]["body_front_x"]
+        )}
     with TemporaryDirectory(prefix="route-plan-scene-") as directory:
         resolved = Path(directory) / "world.yaml"
         resolved.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
         return irsim.make(str(resolved), display=display, step_mode="external", log_level="ERROR")
+
+
+def render_body_shape(length, width, front=None):
+    if front is None:
+        return {"name": "rectangle", "length": length, "width": width}
+    rear, half = front - length, width / 2
+    return {"name": "polygon", "vertices": [[rear, -half], [front, -half], [front, half], [rear, half]]}
 
 
 def disable_environment_keyboard(env, canvas):
@@ -392,7 +404,8 @@ class Viewer:
         if dimensions != self._rendered_dimensions:
             robot = self.env.robot
             robot.plot_clear(all=True)
-            robot.gf = GeometryFactory.create_geometry(name="rectangle", length=dimensions[0], width=dimensions[1])
+            front = self.scene.config["custom"].get("body_front_x")
+            robot.gf = GeometryFactory.create_geometry(**render_body_shape(*dimensions, front))
             robot._init_geometry()
             robot.G, robot.h, robot.cone_type, robot.convex_flag = robot.gf.get_init_Gh()
             robot.info.G, robot.info.h = robot.G, robot.h

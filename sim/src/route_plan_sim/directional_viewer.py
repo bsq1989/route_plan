@@ -85,10 +85,14 @@ class DirectionalViewer:
         dims, tool = record["initial"]["dimensions"], custom["collector"]
         hx, hy = dims["body_length"] / 2, dims["body_width"] / 2
         m = dims["body_margin"]
-        front, lateral = hx + tool["gap"], tool["lateral_offset"]
-        self.safety_rect = Rect(-hx - m, -hy - m, hx + m, hy + m)
-        self.collector_rect = Rect(front, lateral - tool["width"] / 2,
-                                  front + tool["depth"], lateral + tool["width"] / 2)
+        front = custom.get("body_front_x", hx)
+        self.safety_points = Rect(front - 2 * hx - m, -hy - m, front + m, hy + m).corners
+        if "polygon" in tool:
+            self.collector_points = tool["polygon"]
+        else:
+            left = tool["lateral_offset"] - tool["width"] / 2
+            near = front + tool["gap"]
+            self.collector_points = Rect(near, left, near + tool["depth"], left + tool["width"]).corners
         legend = [
             Patch(fc="#72b8e2", alpha=.35, label="发现扇区"), Patch(fc="#3bb693", alpha=.45, label="拾取圆环"),
             Patch(fill=False, ec="#8155af", ls="--", label="auto_fence"),
@@ -148,8 +152,8 @@ class DirectionalViewer:
             self.circle.set_center((cx, cy))
             self.circle.set_radius(radius)
         c, s = math.cos(yaw), math.sin(yaw)
-        for patch, rect in ((self.safety, self.safety_rect), (self.collector, self.collector_rect)):
-            patch.set_xy([(x + c*u - s*v, y + s*u + c*v) for u, v in rect.corners])
+        for patch, points in ((self.safety, self.safety_points), (self.collector, self.collector_points)):
+            patch.set_xy([(x + c*u - s*v, y + s*u + c*v) for u, v in points])
 
         initial = self.record["initial"]
         picked = set(map(str, frame["collected_ids"]))

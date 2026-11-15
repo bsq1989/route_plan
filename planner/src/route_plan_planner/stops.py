@@ -218,6 +218,8 @@ class StopsPlanner:
         covered = set().union(*(candidate.covered - candidate.blocked for candidate in candidates))
         rect = scene.collector
         lateral = (rect.ymin, (rect.ymin + rect.ymax) / 2, rect.ymax)
+        depths = (rect.xmax, rect.xmax - min(.003, (rect.xmax - rect.xmin) / 2))
+        samples = getattr(rect, "pickup_samples", tuple((depth, offset) for depth in depths for offset in lateral))
         headings = max(360, self.options.headings)
         for key, (tx, ty) in scene.targets.items():
             if key in covered:
@@ -227,13 +229,12 @@ class StopsPlanner:
                     return
                 yaw = normalize(index * math.tau / headings)
                 c, s = math.cos(yaw), math.sin(yaw)
-                for depth in (rect.xmax, rect.xmax - min(.003, (rect.xmax - rect.xmin) / 2)):
-                    for offset in lateral:
-                        pose = (tx - c * depth + s * offset, ty - s * depth - c * offset, yaw)
-                        candidate = self._candidate(scene, pose)
-                        if candidate and key in candidate.covered - candidate.blocked:
-                            candidates.append(candidate)
-                            covered.update(candidate.covered - candidate.blocked)
+                for depth, offset in samples:
+                    pose = (tx - c * depth + s * offset, ty - s * depth - c * offset, yaw)
+                    candidate = self._candidate(scene, pose)
+                    if candidate and key in candidate.covered - candidate.blocked:
+                        candidates.append(candidate)
+                        covered.update(candidate.covered - candidate.blocked)
 
     def _pool(self, scene, deadline, incumbent):
         points = list(scene.targets.values())
@@ -247,6 +248,7 @@ class StopsPlanner:
         far = scene.collector.xmax - .015
         depths = sorted({far, (near + far) / 2, near})
         offset = (scene.collector.ymin + scene.collector.ymax) / 2
+        samples = getattr(scene.collector, "pickup_samples", tuple((depth, offset) for depth in depths))
         poses = {tuple(stop["pose"]) for stop in incumbent.pickup_stops} if incumbent else set()
         poses.add(tuple(scene.pose))
         for tx, ty in sorted(anchors):
@@ -254,7 +256,7 @@ class StopsPlanner:
             angles += [i * math.tau / self.options.headings for i in range(self.options.headings)]
             for angle in angles:
                 c, s = math.cos(angle), math.sin(angle)
-                for depth in depths:
+                for depth, offset in samples:
                     poses.add((tx - c * depth + s * offset, ty - s * depth - c * offset, normalize(angle)))
         candidates = []
         at_pose = scene.clone()

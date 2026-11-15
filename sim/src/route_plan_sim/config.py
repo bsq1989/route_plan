@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 import yaml
+from .boundary import PolygonFootprint
 
 
 def default_robot_config() -> Path:
@@ -36,17 +37,21 @@ def load_config(world_path: Path, robot_path: str | Path | None = None) -> tuple
     try:
         body = profile["body"]
         collector = profile["collector"]
-        if body["pose_reference"] != "body_center" or body["rotation_center"] != "body_center":
-            raise ValueError("当前模型仅支持车身中心作为 pose 参考点和旋转中心")
+        reference = body["pose_reference"]
+        if reference not in ("body_center", "base_link") or body["rotation_center"] != reference:
+            raise ValueError("车体位姿参考点须与旋转中心一致")
+        polygon = PolygonFootprint.from_points(collector["polygon"]) if "polygon" in collector else None
         raw = {"body_length": body["length"], "body_width": body["width"],
-               "collector_width": collector["width"],
-               "collector_depth": collector["depth"],
-               "collector_offset": collector.get("lateral_offset", 0),
                "body_margin": profile["safety"]["body_margin"],
                "forward_speed": profile["motion"]["forward_speed"],
                "angular_speed": profile["motion"]["angular_speed"]}
-        if "gap" in collector:
-            raw["collector_gap"] = collector["gap"]
+        if reference == "base_link":
+            raw["body_front_x"] = body["front_x"]
+        if polygon is None:
+            raw.update(collector_width=collector["width"], collector_depth=collector["depth"],
+                       collector_offset=collector.get("lateral_offset", 0))
+            if "gap" in collector:
+                raw["collector_gap"] = collector["gap"]
         if "height" in body:
             raw["body_height"] = body["height"]
         values = {key: float(value) for key, value in raw.items()}
@@ -65,14 +70,22 @@ def load_config(world_path: Path, robot_path: str | Path | None = None) -> tuple
     robot["kinematics"] = {"name": "diff"}
     robot["shape"] = {"name": "rectangle", "length": values["body_length"], "width": values["body_width"]}
     custom = merged.setdefault("custom", {})
+    custom["body_pose_reference"] = reference
+    if reference == "base_link":
+        custom["body_front_x"] = values["body_front_x"]
+    else:
+        custom.pop("body_front_x", None)
     if "body_height" in values:
         custom["body_height"] = values["body_height"]
     else:
         custom.pop("body_height", None)
-    custom["collector"] = {"width": values["collector_width"], "depth": values["collector_depth"],
-                           "lateral_offset": values["collector_offset"]}
-    if "collector_gap" in values:
-        custom["collector"]["gap"] = values["collector_gap"]
+    if polygon is not None:
+        custom["collector"] = {"polygon": polygon.corners}
+    else:
+        custom["collector"] = {"width": values["collector_width"], "depth": values["collector_depth"],
+                               "lateral_offset": values["collector_offset"]}
+        if "collector_gap" in values:
+            custom["collector"]["gap"] = values["collector_gap"]
     for key in ("body_margin", "forward_speed", "angular_speed"):
         custom[key] = values[key]
     return merged, path

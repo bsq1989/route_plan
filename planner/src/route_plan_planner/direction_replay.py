@@ -143,9 +143,15 @@ function render(){
     const [px,py]=xy(...item.xy_m);ctx.font="13px system-ui";ctx.fillText("#"+id,px+6,py-6);
   }
   const l=dims.body_length/2,w=dims.body_width/2,m=dims.body_margin,col=custom.collector;
-  ctx.setLineDash([5,4]);rect(frame.pose,-l-m,-w-m,l+m,w+m,null,"#b3582d");ctx.setLineDash([]);
-  rect(frame.pose,-l,-w,l,w,"#1b4f50","#fff");
-  rect(frame.pose,l+col.gap,col.lateral_offset-col.width/2,l+col.gap+col.depth,col.lateral_offset+col.width/2,"#167e66","#fff");
+  const front=custom.body_front_x??l, rear=front-2*l;
+  ctx.setLineDash([5,4]);rect(frame.pose,rear-m,-w-m,front+m,w+m,null,"#b3582d");ctx.setLineDash([]);
+  rect(frame.pose,rear,-w,front,w,"#1b4f50","#fff");
+  if(col.polygon){
+    const c=Math.cos(yaw),s=Math.sin(yaw);
+    path(col.polygon.map(([u,v])=>[x+c*u-s*v,y+s*u+c*v]),"#167e66","#fff");
+  }else{
+    rect(frame.pose,front+col.gap,col.lateral_offset-col.width/2,front+col.gap+col.depth,col.lateral_offset+col.width/2,"#167e66","#fff");
+  }
   path([[x,y],[x+.26*Math.cos(yaw),y+.26*Math.sin(yaw)]],null,"#fff",false);
   ctx.restore();ctx.lineWidth=2;path(fence,null,"#72877c");
   ctx.fillStyle="#586f65";ctx.font="12px system-ui";ctx.fillText("map / m",24,30);

@@ -6,10 +6,32 @@ import random
 import unittest
 
 from route_plan_sim import Scene
+from route_plan_sim.boundary import Fence, PolygonFootprint
 from route_plan_sim.scene import Rect, normalize
 
 LEGACY_ROBOT = Path(__file__).parent / "fixtures" / "robot.yaml"
 PREVIOUS_ROBOT = Path(__file__).parent / "fixtures" / "robot-v0.2.4.yaml"
+
+
+class PolygonCollectorTest(unittest.TestCase):
+    def test_concave_pickup_and_continuous_disk_contacts(self):
+        collector = PolygonFootprint.from_points(
+            [(1, -.2), (2, -.2), (2, 1), (1.8, 1), (1.8, 0), (1, 0)]
+        )
+        self.assertFalse(collector.contains(1.5, .5))
+        self.assertTrue(collector.contains(1.8, .5))
+        self.assertFalse(collector.intersects_circle(1.5, .5, .29))
+        self.assertAlmostEqual(collector.first_contact(3, .5, 2.5, 0, .05), .38)
+        self.assertAlmostEqual(collector.first_contact(1.5 * math.cos(.1), 1.5 * math.sin(.1), 0, .4, .05),
+                               (.1 - math.asin(.05 / 1.5)) / .4)
+
+    def test_concave_fence_notch_hits_edge_between_safe_endpoints(self):
+        fence = Fence.from_points([(0, 0), (6, 0), (6, 5), (3.2, 5), (3.2, 2.7),
+                                   (2.8, 2.7), (2.8, 5), (0, 5)])
+        collector = PolygonFootprint.from_points([(.5, -.4), (.7, -.4), (.7, .4), (.6, .4), (.5, 0)])
+        self.assertEqual(fence.first_contact(collector, (1, 3.6, 0)), math.inf)
+        self.assertEqual(fence.first_contact(collector, (4.7, 3.6, 0)), math.inf)
+        self.assertAlmostEqual(fence.first_contact(collector, (1, 3.6, 0), 3.7), 1.1 / 3.7)
 
 
 class CircleContactTest(unittest.TestCase):

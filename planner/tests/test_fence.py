@@ -16,12 +16,13 @@ from route_plan_planner.records import describe_scene, restore_scene
 
 # A rectangular notch joins the top boundary and separates the upper arms.
 NOTCH = [(0, 0), (6, 0), (6, 5), (3.2, 5), (3.2, 2.7), (2.8, 2.7), (2.8, 5), (0, 5)]
+RECTANGULAR_ROBOT = Path(__file__).resolve().parents[2] / "sim/tests/fixtures/robot-rectangular.yaml"
 
 
 class FenceTest(unittest.TestCase):
     def request(self, **overrides):
         return {"fence": NOTCH, "pose": [1, 3.6, 0], "targets": [],
-                "method": "stops", "use_ompl": False, **overrides}
+                "method": "stops", "use_ompl": False, "robot_config": str(RECTANGULAR_ROBOT), **overrides}
 
     def scene(self, **overrides):
         return _scene(PlanningRequest.from_dict(self.request(**overrides)))[0]
@@ -87,7 +88,7 @@ class FenceTest(unittest.TestCase):
                 with self.subTest(fence_enabled=enabled):
                     config["custom"]["fence_enabled"] = enabled
                     path.write_text(yaml.safe_dump(config), encoding="utf-8")
-                    static = Scene(path, scenario="empty")
+                    static = Scene(path, scenario="empty", robot_config=RECTANGULAR_ROBOT)
                     request = PlanningRequest.from_scene(static, method="stops")
                     self.assertEqual(request.to_dict()["fence"], vertices)
                     self.assertEqual((request.width, request.height), (3.936, 4.849))

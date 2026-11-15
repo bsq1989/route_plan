@@ -145,11 +145,11 @@ class ViewerTest(unittest.TestCase):
         viewer = Viewer(Scene(), display=False)
         try:
             self.assertEqual(viewer.dimension_boxes["body_length"].text, "0.702")
-            self.assertEqual(viewer.dimension_boxes["collector_width"].text, "0.19")
-            self.assertEqual(viewer.dimension_boxes["collector_depth"].text, "0.09")
+            self.assertEqual(viewer.dimension_boxes["collector_width"].text, "0.466427")
+            self.assertEqual(viewer.dimension_boxes["collector_depth"].text, "0.247522")
             self.assertAlmostEqual(viewer.env.robot.geometry.area, .702 * .610)
-            self.assertAlmostEqual(viewer.scene.collector.xmin, .534)
-            np.testing.assert_allclose(viewer.collector.get_xy()[:4],
+            self.assertAlmostEqual(viewer.scene.collector.xmin, .400531)
+            np.testing.assert_allclose(viewer.collector.get_xy()[:-1],
                                        viewer.scene.vertices(viewer.scene.collector))
         finally:
             viewer.env.end()

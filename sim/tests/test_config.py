@@ -8,8 +8,9 @@ import unittest
 import yaml
 
 from route_plan_sim import Scene
-from route_plan_sim.config import default_robot_config
 from route_plan_sim.scene import DEFAULT_CONFIG
+
+RECTANGULAR_ROBOT = Path(__file__).parent / "fixtures" / "robot-rectangular.yaml"
 
 
 class RobotConfigTest(unittest.TestCase):
@@ -17,7 +18,7 @@ class RobotConfigTest(unittest.TestCase):
         self.directory = TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.folder = Path(self.directory.name)
-        self.profile = yaml.safe_load(default_robot_config().read_text())
+        self.profile = yaml.safe_load(RECTANGULAR_ROBOT.read_text())
 
     def write_profile(self, profile=None):
         path = self.folder / "robot.yaml"
@@ -26,13 +27,17 @@ class RobotConfigTest(unittest.TestCase):
 
     def test_real_robot_is_the_default_for_each_new_episode(self):
         scene = Scene()
-        for key, expected in dict(body_length=.702, body_width=.610, collector_width=.190,
-                                  collector_depth=.090, body_margin=.050).items():
+        for key, expected in dict(body_length=.702, body_width=.610, collector_width=.466427,
+                                  collector_depth=.247522, body_margin=.050).items():
             self.assertAlmostEqual(scene.dimensions[key], expected)
         self.assertAlmostEqual(scene.config["custom"]["body_height"], .169)
-        self.assertAlmostEqual(scene.collector_gap, .183)
-        self.assertAlmostEqual(scene.collector.ymin, -.095)
-        self.assertAlmostEqual(scene.collector.ymax, .095)
+        self.assertEqual(scene.body_pose_reference, "base_link")
+        self.assertAlmostEqual(scene.body.xmax, .341)
+        self.assertAlmostEqual(scene.body.xmin, -.361)
+        self.assertAlmostEqual(scene.collector_gap, .059531)
+        self.assertEqual(len(scene.collector.corners), 241)
+        self.assertTrue(scene.collector.contains(.56, .14))
+        self.assertFalse(scene.collector.contains(.43, 0))
         self.assertAlmostEqual(scene.safety_body.xmax - scene.safety_body.xmin, .802)
         self.assertAlmostEqual(scene.safety_body.ymax - scene.safety_body.ymin, .710)
         scene.set_dimensions(**(scene.dimensions | {"body_length": .7}))
@@ -120,7 +125,7 @@ class RobotConfigTest(unittest.TestCase):
             Scene(robot_config=self.folder / "absent.yaml")
 
     def test_real_narrow_collector_does_not_remove_shoulder_points(self):
-        scene = Scene()
+        scene = Scene(robot_config=RECTANGULAR_ROBOT)
         scene.targets.clear()
         scene.add_target(4.8, 4.8)
         scene.forward(1.5)

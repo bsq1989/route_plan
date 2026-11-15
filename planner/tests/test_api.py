@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+import yaml
 
 from route_plan_planner import PlanningRequest, Target, plan
 from route_plan_planner.api import _scene
@@ -76,7 +77,9 @@ class PublicApiTest(unittest.TestCase):
         decoded = json.loads(json.dumps(result.to_dict(), allow_nan=False))
         self.assertTrue(decoded["success"])
         profile = decoded["resolved_request"]["robot_config"]
-        self.assertEqual(profile["collector"]["width"], .190)
+        self.assertEqual(len(profile["collector"]["polygon"]), 241)
+        self.assertEqual(profile["body"]["pose_reference"], "base_link")
+        self.assertEqual(profile["body"]["front_x"], .341)
         self.assertEqual(profile["body"]["height"], .169)
         repeated = plan(decoded["resolved_request"])
         self.assertTrue(repeated.success)
@@ -93,7 +96,8 @@ class PublicApiTest(unittest.TestCase):
         self.assertTrue(plan(result.resolved_request).success)
 
     def test_independent_gap_changes_pickup_geometry_and_roundtrips(self):
-        profile = plan(self.request(targets=[])).resolved_request["robot_config"]
+        path = Path(__file__).resolve().parents[2] / "sim/tests/fixtures/robot-rectangular.yaml"
+        profile = yaml.safe_load(path.read_text())
         profile["collector"]["gap"] = .25
         request = self.request(method="stops", robot_config=profile, targets=[Target("item", 3.67, 4.5)])
         result = plan(request)

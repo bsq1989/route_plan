@@ -14,7 +14,9 @@ from route_plan_sim import Scene
 def describe_scene(scene: Scene) -> dict:
     custom = scene.config["custom"]
     body = {"length": scene.dimensions["body_length"], "width": scene.dimensions["body_width"],
-            "pose_reference": "body_center", "rotation_center": "body_center"}
+            "pose_reference": scene.body_pose_reference, "rotation_center": scene.body_pose_reference}
+    if scene.body_pose_reference == "base_link":
+        body["front_x"] = scene.body.xmax
     if "body_height" in custom:
         body["height"] = custom["body_height"]
     return {
@@ -22,7 +24,7 @@ def describe_scene(scene: Scene) -> dict:
         "vehicle_config": {
             "version": 1, "units": "m",
             "body": body,
-            "collector": dict(custom["collector"]),
+            "collector": deepcopy(custom["collector"]),
             "safety": {"body_margin": scene.body_margin},
             "motion": {"forward_speed": custom["forward_speed"],
                        "angular_speed": custom["angular_speed"]},
@@ -79,6 +81,11 @@ def restore_scene(record: dict, *, allow_safety_intrusions: bool = False) -> Sce
     height = scene.config["custom"].get("body_height")
     scene.config = deepcopy(record["world_config"])
     scene.config["custom"]["collector"] = collector
+    scene.config["custom"]["body_pose_reference"] = scene.body_pose_reference
+    if scene.body_pose_reference == "base_link":
+        scene.config["custom"]["body_front_x"] = scene.body.xmax
+    else:
+        scene.config["custom"].pop("body_front_x", None)
     if height is None:
         scene.config["custom"].pop("body_height", None)
     else:

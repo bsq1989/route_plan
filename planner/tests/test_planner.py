@@ -15,11 +15,12 @@ from route_plan_planner.ompl_motion import OmplMotion
 from route_plan_planner.records import describe_scene, read_json, restore_scene, write_json
 
 FIXTURES = Path(__file__).parent / "fixtures" / "static_cases.json"
+RECTANGULAR_ROBOT = Path(__file__).resolve().parents[2] / "sim/tests/fixtures/robot-rectangular.yaml"
 
 
 class StaticBaselineTest(unittest.TestCase):
-    def empty(self):
-        scene = Scene()
+    def empty(self, robot_config=None):
+        scene = Scene(robot_config=robot_config)
         scene.targets.clear()
         return scene
 
@@ -111,7 +112,7 @@ class StaticBaselineTest(unittest.TestCase):
         self.assertFalse(final.failure)
 
     def test_record_roundtrip_uses_stored_vehicle_and_preserves_ids(self):
-        scene = self.empty()
+        scene = self.empty(RECTANGULAR_ROBOT)
         scene.set_dimensions(**(scene.dimensions | {"collector_width": .31}))
         scene.add_target(5, 4.5)
         scene.add_target(6, 6)
@@ -162,7 +163,7 @@ class StaticBaselineTest(unittest.TestCase):
             self.assertEqual(final.target_diameter, .1)
 
     def test_ompl_bypasses_blocker_and_final_approach_collects(self):
-        scene = self.empty()
+        scene = self.empty(RECTANGULAR_ROBOT)
         scene.add_target(4.5, 4.8)
         scene.add_target(6.5, 4.5)
         blocker_id, target_id = scene.targets

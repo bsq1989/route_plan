@@ -101,6 +101,7 @@ class StaticPlanner:
         far = scene.collector.xmax + scene.pickup_radius - min(.015, (scene.collector.xmax - scene.collector.xmin) / 10)
         depths = (far, (near + far) / 2) if near < far else ((scene.collector.xmin + scene.collector.xmax) / 2,)
         offset = (scene.collector.ymin + scene.collector.ymax) / 2
+        samples = getattr(scene.collector, "pickup_samples", tuple((depth, offset) for depth in depths))
         for tx, ty in scene.targets.values():
             bearing = math.atan2(ty - scene.pose[1], tx - scene.pose[0])
             angles = [bearing, scene.pose[2]] + [i * math.tau / self.options.headings
@@ -118,9 +119,9 @@ class StaticPlanner:
                         candidates.append((*scene.pose[:2], normalize(angle)))
             for angle in angles:
                 c, s = math.cos(angle), math.sin(angle)
-                for depth in depths:
-                    candidates.append((tx - c * depth + s * offset,
-                                       ty - s * depth - c * offset, normalize(angle)))
+                for depth, lateral in samples:
+                    candidates.append((tx - c * depth + s * lateral,
+                                       ty - s * depth - c * lateral, normalize(angle)))
         # A cheap ordering, not an optimization objective or a pruning proof.
         return sorted(set(candidates), key=lambda g: math.dist(scene.pose[:2], g[:2])
                       + .12 * abs(normalize(g[2] - scene.pose[2])))

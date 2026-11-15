@@ -81,7 +81,8 @@ class PoseControllerTest(unittest.TestCase):
         self.assertAlmostEqual(self.scene.pose[2], 0)
 
     def test_fixed_obstacle_stops_forward_motion_at_first_contact(self):
-        scene = Scene(scenario="empty", obstacles=[(4.3, 4.5, .3)])
+        scene = Scene(scenario="empty", obstacles=[(4.3, 4.5, .3)],
+                      robot_config=Path(__file__).parent / "fixtures" / "robot-rectangular.yaml")
         motion = PoseController(scene)
         motion.set_goal(5, 4.5, 0)
         motion.step(10)

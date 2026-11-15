@@ -1,6 +1,7 @@
 """A simple polygon boundary and continuous contact with a moving rectangle."""
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 import math
 
 EPS = 1e-9
@@ -153,7 +154,9 @@ class Fence:
         for vx, vy in self.vertices:
             dx, dy = vx - x, vy - y
             local.append((c * dx + s * dy, -s * dx + c * dy))
-        if any(_hits_rect(a, b, rect) for a, b in zip(local, (*local[1:], local[0]))):
+        segments = zip(local, (*local[1:], local[0]))
+        if any(rect.intersects_segment(a, b) if isinstance(rect, PolygonFootprint) else _hits_rect(a, b, rect)
+               for a, b in segments):
             return 0.
         if not distance and not rotation:
             return math.inf
@@ -186,3 +189,136 @@ class Fence:
                     if -EPS <= position <= edge.length + EPS:
                         first = min(first, t)
         return first
+
+
+@dataclass(frozen=True)
+class PolygonFootprint:
+    """Closed simple polygon with analytic disk contact under straight/turn motion."""
+
+    polygon: Fence
+    reach: float = field(init=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, "reach", max(math.hypot(*point) for point in self.corners))
+
+    @classmethod
+    def from_points(cls, points):
+        try:
+            return _polygon_footprint(tuple(tuple(point) for point in points))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Invalid collector polygon: {error}") from error
+
+    @property
+    def corners(self):
+        return self.polygon.vertices
+
+    @property
+    def xmin(self):
+        return self.polygon.bounds[0]
+
+    @property
+    def ymin(self):
+        return self.polygon.bounds[1]
+
+    @property
+    def xmax(self):
+        return self.polygon.bounds[2]
+
+    @property
+    def ymax(self):
+        return self.polygon.bounds[3]
+
+    def intersects_segment(self, a, b):
+        if not _hits_rect(a, b, self):
+            return False
+        edge = Edge.between(a, b)
+        return self.contains(*a) or any(edge.intersects(other) for other in self.polygon.edges)
+
+    def contains(self, x, y):
+        return self.intersects_circle(x, y, 0.)
+
+    @property
+    @lru_cache(maxsize=16)
+    def pickup_samples(self):
+        """Interior points at several depths and lateral offsets for pose search."""
+        result = []
+        for fraction in (.8, .6, .4, .2):
+            y = self.ymin + fraction * (self.ymax - self.ymin)
+            limits = sorted(ax + (bx - ax) * ((y - ay) / (by - ay))
+                            for (ax, ay), (bx, by) in ((e.start, e.end) for e in self.polygon.edges)
+                            if (ay > y) != (by > y))
+            for left, right in zip(limits[::2], limits[1::2]):
+                result.extend((left + part * (right - left), y) for part in (.85, .5))
+        return tuple(result)
+
+    def intersects_circle(self, x, y, radius):
+        if (x < self.xmin - radius - EPS or x > self.xmax + radius + EPS or
+                y < self.ymin - radius - EPS or y > self.ymax + radius + EPS):
+            return False
+        inside = False
+        for edge in self.polygon.edges:
+            ax, ay = edge.start
+            bx, by = edge.end
+            if edge.distance((x, y)) <= radius + EPS:
+                return True
+            if (ay > y) != (by > y) and x < ax + (bx - ax) * ((y - ay) / (by - ay)):
+                inside = not inside
+        return inside
+
+    def first_contact(self, px, py, distance, rotation, radius=0.):
+        if distance:
+            if (px < self.xmin - radius - EPS or px - distance > self.xmax + radius + EPS
+                    or py < self.ymin - radius - EPS or py > self.ymax + radius + EPS):
+                return math.inf
+        elif math.hypot(px, py) > self.reach + radius + EPS:
+            return math.inf
+        if self.intersects_circle(px, py, radius):
+            return 0.
+        if not distance and not rotation:
+            return math.inf
+        first = math.inf
+        for edge in self.polygon.edges:
+            ux, uy = edge.direction
+            ax, ay = edge.start
+            across = ux * py - uy * px
+            along = ux * px + uy * py
+            edge_origin = ux * ay - uy * ax
+            for offset in (-radius, radius) if radius else (0.,):
+                value = edge_origin + offset
+                if distance:
+                    rate = uy * distance
+                    times = [(value - across) / rate] if abs(rate) > EPS else ()
+                else:
+                    times = trig_times(across, -along, value, rotation)
+                for t in times:
+                    if not -EPS <= t <= min(first, 1. + EPS):
+                        continue
+                    theta = rotation * t
+                    x = math.cos(theta) * px + math.sin(theta) * py - distance * t
+                    y = -math.sin(theta) * px + math.cos(theta) * py
+                    projection, _ = edge.project(x, y)
+                    if -EPS <= projection <= edge.length + EPS:
+                        first = max(0., min(1., t))
+            # End caps of the disk-offset segment. These also cover collinear
+            # zero-radius entries into an edge during a straight move.
+            if distance:
+                dy = abs(py - ay)
+                if dy <= radius + EPS:
+                    root = math.sqrt(max(0., radius**2 - dy**2))
+                    times = ((px - ax - root) / distance, (px - ax + root) / distance)
+                else:
+                    times = ()
+            elif radius:
+                value = (px**2 + py**2 + ax**2 + ay**2 - radius**2) / 2
+                times = trig_times(px * ax + py * ay, py * ax - px * ay, value, rotation)
+            else:
+                times = ()
+            for t in times:
+                if -EPS <= t <= min(first, 1. + EPS):
+                    first = max(0., min(1., t))
+        return first
+
+
+@lru_cache(maxsize=16)
+def _polygon_footprint(points):
+    return PolygonFootprint(Fence.from_points(points))

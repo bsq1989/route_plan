@@ -1,11 +1,25 @@
 import math
 import unittest
 from functools import partial
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import yaml
 
 from route_plan_planner.api import PlanningRequest
 from route_plan_planner.directional import run_case, simulate_action
 from route_plan_planner.direction_policy import CoverageConfig, CoveragePolicy, approach_distance, intersect_bearings, new_view_angle, ranked_headings
 from route_plan_sim.directional import DirectionalScene, load_config
+
+
+def rectangular_random_case(**kwargs):
+    config = load_config()
+    config["custom"]["robot_config"] = str(Path(__file__).resolve().parents[2] /
+                                           "sim/tests/fixtures/robot-rectangular.yaml")
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "directional.yaml"
+        path.write_text(yaml.safe_dump(config))
+        return run_case("random-40-interior", seed=42, config_path=path, **kwargs)
 
 
 class DirectionalTest(unittest.TestCase):
@@ -149,7 +163,7 @@ class DirectionalTest(unittest.TestCase):
         points = sim.initial["remaining"].values()
         self.assertEqual(len(points), 40)
         # Default collector corner determines the sweep, plus the target radius.
-        clearance = math.hypot(.624, .095) + .05
+        clearance = max(math.hypot(*point) for point in sim.world_config["custom"]["collector"]["polygon"]) + .05
         for x, y in points:
             self.assertGreater(min(x, y, 12 - x, 9 - y), clearance)
 
@@ -182,7 +196,7 @@ class DirectionalTest(unittest.TestCase):
         self.assertLess(ranked[0]["cost"], ranked[1]["cost"])
 
     def test_side_bearing_is_measured_and_picked_on_first_pass(self):
-        record = run_case("random-40-interior", seed=42)
+        record = rectangular_random_case()
         point = record["initial"]["remaining"][31]
         first_measurement = next(f for f in record["observations"]
                                  if any(d.get("xy_m") == point for d in f["detections"]))
@@ -204,7 +218,7 @@ class DirectionalTest(unittest.TestCase):
         self.assertIsNone(intersect_bearings(first, {**second, "bearing_map_rad": .01}, 1.4, 5.))
 
     def test_nearby_bearings_reduce_return_trips_without_entering_plan(self):
-        record = run_case("random-40-interior", seed=42)
+        record = rectangular_random_case()
         stops = {key: record["trace"][stop["trace_index"]]["time_s"] for action in record["actions"]
                  for stop in action.get("pickups", ()) for key in stop["ids"]}
         self.assertEqual(record["stop_reason"], "all_collected")
@@ -298,9 +312,8 @@ class DirectionalTest(unittest.TestCase):
         self.assertEqual([(target.x, target.y) for target in retry.targets], [second])
 
     def test_deferred_bearings_trigger_fresh_observation_before_scan(self):
-        baseline = run_case("random-40-interior", seed=42)
-        record = run_case("random-40-interior", seed=42,
-                          policy=partial(CoveragePolicy, use_deferred_bearings=True))
+        baseline = rectangular_random_case()
+        record = rectangular_random_case(policy=partial(CoveragePolicy, use_deferred_bearings=True))
         probe = next(a for a in record["approaches"] if a.get("source") == "deferred_bearing")
         before, after = (record["observations"][probe[key]] for key in ("frame_index", "observation_index"))
         self.assertEqual(before["pose"][:2], after["pose"][:2])

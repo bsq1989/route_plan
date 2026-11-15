@@ -10,10 +10,11 @@ from route_plan_planner import PlanningRequest, Target, plan_pickup_adjustment, 
 from route_plan_planner.adjustment import _simulation_requests, _translate_pose
 from route_plan_planner.api import _scene
 
+RECTANGULAR_ROBOT = Path(__file__).resolve().parents[2] / "sim/tests/fixtures/robot-rectangular.yaml"
 
 class PickupAdjustmentTest(unittest.TestCase):
     def request(self, *targets):
-        return PlanningRequest(12., 9., (3., 4.5, 0.), targets, timeout=.5)
+        return PlanningRequest(12., 9., (3., 4.5, 0.), targets, timeout=.5, robot_config=RECTANGULAR_ROBOT)
 
     def verify(self, result, picked, pending, limit=.40):
         self.assertTrue(result.success, result.reason)
@@ -129,6 +130,7 @@ class PickupAdjustmentTest(unittest.TestCase):
 
     def test_mapless_request_keeps_fixed_coordinates_and_obstacle_checks(self):
         request = dict(pose=(-1., 0., 0.), frame_id="pickup_origin", timeout=.5,
+                       robot_config=str(RECTANGULAR_ROBOT),
                        targets=[dict(id="item", x=-.25, y=0.), dict(id="neighbor", x=-.46, y=-.23)])
         result = plan_pickup_adjustment(request, ["item"])
         self.assertTrue(result.success, result.reason)

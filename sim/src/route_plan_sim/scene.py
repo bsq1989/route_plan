@@ -14,7 +14,7 @@ import math
 import random
 from pathlib import Path
 
-from .boundary import EPS, Fence, trig_times
+from .boundary import EPS, Fence, PolygonFootprint, trig_times
 from .config import load_config
 
 DEFAULT_CONFIG = files(__package__).joinpath("world.yaml")
@@ -166,9 +166,8 @@ class Scene:
             raise ValueError("Target diameter must be nonnegative and smaller than the map")
         custom["target_diameter"] = self.target_diameter
         length, width = finite(robot["shape"]["length"]), finite(robot["shape"]["width"])
-        depth, cw = finite(custom["collector"]["depth"]), finite(custom["collector"]["width"])
-        if min(self.width, self.height, length, width, depth, cw) <= 0:
-            raise ValueError("Map, body and collector dimensions must be positive")
+        if min(self.width, self.height, length, width) <= 0:
+            raise ValueError("Map and body dimensions must be positive")
         obstacle_values = custom.get("obstacles", ()) if obstacles is None else obstacles
         self.obstacles = tuple(tuple(map(finite, disk)) for disk in obstacle_values)
         xmin, ymin, xmax, ymax = self.map_bounds
@@ -181,21 +180,30 @@ class Scene:
             custom["obstacles"] = [list(disk) for disk in self.obstacles]
         if robot["shape"]["name"] != "rectangle":
             raise ValueError("This scene requires a rectangular robot")
-        self.body = Rect(-length / 2, -width / 2, length / 2, width / 2)
+        self.body_pose_reference = custom["body_pose_reference"]
+        front = custom.get("body_front_x", length / 2)
+        if not 0 < front < length:
+            raise ValueError("Body front must put the pose reference inside the body")
+        self.body = Rect(front - length, -width / 2, front, width / 2)
         self.body_margin = finite(custom.get("body_margin", 0) if body_margin is None else body_margin)
         if self.body_margin < 0:
             raise ValueError("Body margin must be nonnegative")
         custom["body_margin"] = self.body_margin
-        self._gap_follows_margin = self.rule_version == 2 or (
-            self.rule_version == 3 and "gap" not in custom["collector"]
-        )
-        self.collector_gap = (self.body_margin if self._gap_follows_margin
-                              else finite(custom["collector"].get("gap", 0)))
-        custom["collector"]["gap"] = self.collector_gap
-        self.collector_offset = finite(custom["collector"]["lateral_offset"])
-        front = length / 2 + self.collector_gap
-        self.collector = Rect(front, self.collector_offset - cw / 2,
-                              front + depth, self.collector_offset + cw / 2)
+        tool = custom["collector"]
+        if "polygon" in tool:
+            self.collector = PolygonFootprint.from_points(tool["polygon"])
+            self.collector_gap = self.collector.xmin - front
+            self.collector_offset = (self.collector.ymin + self.collector.ymax) / 2
+            self._gap_follows_margin = False
+        else:
+            self._gap_follows_margin = self.rule_version == 2 or (self.rule_version == 3 and "gap" not in tool)
+            self.collector_gap = self.body_margin if self._gap_follows_margin else tool.get("gap", 0.)
+            tool["gap"] = self.collector_gap
+            self.collector_offset = tool["lateral_offset"]
+            xmin = front + self.collector_gap
+            half_width = tool["width"] / 2
+            self.collector = Rect(xmin, self.collector_offset - half_width, xmin + tool["depth"],
+                                  self.collector_offset + half_width)
         self.initial_pose = tuple(finite(v) for v in robot["state"])
         if len(self.initial_pose) != 3:
             raise ValueError("Robot state must contain x, y, theta")
@@ -233,14 +241,16 @@ class Scene:
         This does not construct a viewer or change the original episode.
         """
         result = copy(self)
-        result.config = deepcopy(self.config)
+        points = self.config["custom"]["collector"].get("polygon")
+        immutable = {id(points): points} if isinstance(self.collector, PolygonFootprint) and points is self.collector.corners else {}
+        result.config = deepcopy(self.config, immutable)
         result.targets = self.targets.copy()
         result.collected = self.collected.copy()
         result.path = self.path.copy()
         result.collection_events = self.collection_events.copy()
         return result
 
-    def vertices(self, rect: Rect) -> list[tuple[float, float]]:
+    def vertices(self, rect: Rect | PolygonFootprint) -> list[tuple[float, float]]:
         px, py, theta = self.pose
         c, s = math.cos(theta), math.sin(theta)
         return [(px + c * x - s * y, py + s * x + c * y) for x, y in rect.corners]
@@ -348,11 +358,18 @@ class Scene:
         margin = self.body_margin if body_margin is None else finite(body_margin)
         if margin < 0:
             raise ValueError("Body margin must be nonnegative")
-        body = Rect(-length / 2, -width / 2, length / 2, width / 2)
+        front = self.body.xmax if self.body_pose_reference == "base_link" else length / 2
+        if front >= length:
+            raise ValueError("Body front must put the pose reference inside the body")
+        body = Rect(front - length, -width / 2, front, width / 2)
         gap = margin if self._gap_follows_margin else self.collector_gap
-        front = length / 2 + gap
-        collector = Rect(front, self.collector_offset - cw / 2,
-                          front + depth, self.collector_offset + cw / 2)
+        if isinstance(self.collector, PolygonFootprint):
+            if abs(cw - self.dimensions["collector_width"]) > 1e-6 or abs(depth - self.dimensions["collector_depth"]) > 1e-6:
+                raise ValueError("Edit collector polygon vertices in the vehicle configuration")
+            collector = self.collector
+        else:
+            xmin = front + gap
+            collector = Rect(xmin, self.collector_offset - cw / 2, xmin + depth, self.collector_offset + cw / 2)
         candidate = copy(self)
         candidate.body, candidate.collector = body, collector
         candidate.body_margin = margin
@@ -369,7 +386,8 @@ class Scene:
         self.body_margin = margin
         self.collector_gap = gap
         self.config["robot"]["shape"].update(length=length, width=width)
-        self.config["custom"]["collector"].update(width=cw, depth=depth, gap=gap)
+        if isinstance(collector, Rect):
+            self.config["custom"]["collector"].update(width=cw, depth=depth, gap=gap)
         self.config["custom"]["body_margin"] = margin
         if self.collection_mode == "contact":
             self._collect_at_pose()
@@ -508,6 +526,13 @@ class Scene:
                        for rect in (self.safety_body, self.collector))
         x, y, theta = self.pose
         xmin, ymin, xmax, ymax = self.map_bounds
+        reach = max(math.hypot(self.safety_body.xmin, self.safety_body.ymin),
+                    math.hypot(self.safety_body.xmax, self.safety_body.ymax),
+                    self.collector.reach if isinstance(self.collector, PolygonFootprint) else
+                    max(math.hypot(*point) for point in self.collector.corners)) + EPS
+        if all(xmin + reach < px < xmax - reach and ymin + reach < py < ymax - reach
+               for px, py in ((x, y), (x + distance * math.cos(theta), y + distance * math.sin(theta)))):
+            return math.inf
         x_edges, y_edges = (xmin, xmax), (ymin, ymax)
         first = math.inf
         for rect in (self.safety_body, self.collector):

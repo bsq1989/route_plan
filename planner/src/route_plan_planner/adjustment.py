@@ -84,16 +84,22 @@ def _candidate_poses(scene, points, origin, limit, deadline):
         bottom, top = max(v) - box.ymax, min(v) - box.ymin
         if left > right or bottom > top:
             continue
-        for a in _offsets(left, right):
-            for b in _offsets(bottom, top):
-                distance = math.hypot(a, b)
-                dx, dy = c * a - s * b, s * a + c * b
-                if math.dist((x + dx, y + dy), origin) > limit + EPS:
-                    continue
-                approach = math.atan2(dy, dx) if distance > EPS else yaw
-                turns = abs(normalize(approach - yaw)) + abs(normalize(angle - approach))
-                clearance = min(a - left, right - a, b - bottom, top - b)
-                poses[x + dx, y + dy, angle] = (distance + .12 * turns, -clearance)
+        offsets_in_heading = [(a, b) for a in _offsets(left, right) for b in _offsets(bottom, top)]
+        samples = getattr(box, "pickup_samples", None)
+        if samples is not None:
+            mid_u, mid_v = (min(u) + max(u)) / 2, (min(v) + max(v)) / 2
+            offsets_in_heading.extend((mid_u - a, mid_v - b) for a, b in samples)
+        for a, b in offsets_in_heading:
+            if samples is not None and not all(box.contains(p - a, q - b) for p, q in zip(u, v)):
+                continue
+            distance = math.hypot(a, b)
+            dx, dy = c * a - s * b, s * a + c * b
+            if math.dist((x + dx, y + dy), origin) > limit + EPS:
+                continue
+            approach = math.atan2(dy, dx) if distance > EPS else yaw
+            turns = abs(normalize(approach - yaw)) + abs(normalize(angle - approach))
+            clearance = min(a - left, right - a, b - bottom, top - b)
+            poses[x + dx, y + dy, angle] = (distance + .12 * turns, -clearance)
     return sorted(poses, key=lambda pose: (poses[pose], pose))
 
 
