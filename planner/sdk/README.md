@@ -70,6 +70,27 @@ python examples/multi_pickup.py
 
 `quick_start.py` 可以复制到其他工程中运行，只有 SDK 导入，没有修改 `sys.path` 或引用原仓库。JSON 调用直接 `plan(request_dict)` 即可；输入示例见 `examples/request.json`。
 
+## 独立粗线索记忆与选簇
+
+由业务自行安排观测、补点和拾取时，每趟任务创建一个 `ClusterMemory`。每批粗点使用同一固定坐标系下的米制 `[x, y]`。观测到新点随时调用 `remember()`，需要换区时才调用 `next_cluster()`。
+
+```python
+from route_plan_sdk import ClusterMemory
+
+memory = ClusterMemory(cluster_radius_m=1.6)
+memory.remember([(2.4, 0.3), (4.8, 0.4)])
+memory.remember([(4.85, 0.4), (5.2, 0.7)])  # 新观测或补点
+
+cluster = memory.next_cluster(pose=(0.0, 0.0, 0.0))
+if cluster is not None:
+    print(cluster.cluster_id, cluster.anchor_xy_m)
+    print([hint.xy_m for hint in cluster.hints])
+```
+
+`next_cluster()` 用最新观测按待检查点数、距固定锚点的距离、转角和簇 ID 排序，返回已弹出的簇及其粗线索快照。没有候选时返回 `None`。`is_next_cluster()` 可以只检查队列是否有候选。一个簇在一趟任务中只弹出一次，后续补点可以形成新簇。需要更新已选簇时，用 `pending_hints(cluster_id)` 读取最新待检查线索。调用方也可以用 `mark_attempted(hint.id, missed=True)` 记录观测过该位置且未再次发现目标。再次出现的粗点可以恢复成待检查线索。
+
+这组选簇接口只接收粗测坐标和选簇时的实测位姿，观测策略、车辆运动和精测拾取由调用方组织。拿到精测目标后可独立调用 `plan()`。仿真中的 `CoveragePolicy` 也使用这一套簇记忆。
+
 ## Gateway 远近拾取策略
 
 每趟任务创建一个 `CoveragePolicy`。策略维护精测目标、当前与历史方位线索以及可选的二级缓存。Gateway 负责采集、连续避碰和围栏校验、动作执行以及逐目标拾取确认。

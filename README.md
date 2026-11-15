@@ -11,6 +11,7 @@
 - [圆形目标规划适配](docs/circle-target-adaptation.md)：直径 10 cm 的接触规则、接近动作与十组静态回归。
 - [系统输入输出与集成接口](docs/integration-io.md)：输入字段、单位、规划输出、执行语义及最小对接示例。
 - [纯算法 Python SDK](docs/python-sdk.md)：可独立安装的源码包、wheel、依赖清单和跨工程调用 example。
+- [CoveragePolicy 聚类搜索算法](docs/coverage-policy-design.md)，介绍按密度选簇、分段接近、精测拾取和环视终止。
 - [目标消除规划与分阶段验证计划](docs/planning-roadmap.md)：从静态完整准确观测开始，逐步验证车头方向加点和随机加点。
 - [第一阶段静态规划 baseline](docs/static-baseline.md)：当前实现范围、验证结果与能力边界。
 - [路径长度优化与 A/B 验证](docs/path-length-optimization.md)：在全部清除及安全约束下优化路程，对比可行性 baseline。

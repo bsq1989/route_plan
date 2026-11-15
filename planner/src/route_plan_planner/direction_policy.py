@@ -3,14 +3,14 @@
 from collections import deque
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
-import heapq
+from dataclasses import asdict, dataclass
 import math
 from uuid import uuid4
 
 from route_plan_sim.scene import EPS, normalize
 
 from .api import PickupStop, PlanningRequest, Target, plan
+from .cluster_memory import ClusterMemory, CoverageCluster, coordinates, match_positions, relative
 from .motion import MIN_ROTATION as MIN_TURN, MIN_TRANSLATION as MIN_DISTANCE, Pose
 
 
@@ -24,11 +24,6 @@ MIN_BEARING_CROSSING_SINE = math.sin(math.radians(4))
 DEFERRED_BEARING_LIMIT = 96
 DEFERRED_BEARING_LIFETIME_S = 30.
 DEFERRED_RECHECK_DISTANCE = NEAR_OBSERVATION_REACH
-
-
-def relative(pose, point):
-    dx, dy = point[0] - pose[0], point[1] - pose[1]
-    return math.hypot(dx, dy), normalize(math.atan2(dy, dx) - pose[2])
 
 
 @dataclass(frozen=True)
@@ -73,16 +68,6 @@ class CoverageAction:
     targets: tuple[Target, ...] = ()
     distance_m: float | None = None
     auto_fence_radius_m: float | None = None
-
-
-@dataclass(frozen=True)
-class CoverageCluster:
-    """A cluster selected for the next search, in the task coordinate frame."""
-
-    cluster_id: int
-    anchor_xy_m: tuple[float, float]
-    radius_m: float
-    pending_count: int
 
 
 class _RefreshObservation(Exception):
@@ -223,7 +208,7 @@ class CoveragePolicy:
         self._run = self._run_policy() if self.config.cluster_radius_m is None else self._run_clusters()
         self._observation_ids = set()
         self.use_deferred_bearings = use_deferred_bearings
-        self.memory = {}
+        self._memory = {}
         self.decisions, self.approaches, self.plans = [], [], []
         self.sweep_origin = None
         self.seen_headings = []
@@ -237,11 +222,10 @@ class CoveragePolicy:
         self.deferred_probe_pose = None
         self.deferred_misses = set()
         self.latest_frame = None
-        self.cluster_anchors = {}
         self.active_cluster = None
-        self._visited_clusters = set()
-        self.cluster_attempts = set()
-        self.cluster_misses = set()
+        self._clusters = (ClusterMemory(cluster_radius_m=self.config.cluster_radius_m,
+                                       coarse_match_tolerance_m=self.config.coarse_match_tolerance_m)
+                          if self.config.cluster_radius_m is not None else None)
         self._selected_clusters: deque[CoverageCluster] = deque()
 
     def is_next_cluster(self) -> bool:
@@ -279,7 +263,7 @@ class CoveragePolicy:
             raise ValueError("Unknown action status")
         if status == "partial" and action.kind != "pickup":
             raise ValueError("Only a pickup batch can be partially successful")
-        measured = self._coordinates(pose, 3, "pose")
+        measured = coordinates(pose, 3, "pose")
         if type(time_s) not in (int, float) or not math.isfinite(time_s) or time_s < self._result_time:
             raise ValueError("Feedback time must be finite and nondecreasing")
         picked = tuple(picked_ids)
@@ -300,14 +284,6 @@ class CoveragePolicy:
         self._result_time = time_s
         self._advance({"status": status, "reason": reason, "frame": frame, "picked_ids": picked})
         return True
-
-    @staticmethod
-    def _coordinates(values, size, name):
-        if not isinstance(values, (tuple, list)) or len(values) != size or any(
-            type(value) not in (int, float) or not math.isfinite(value) for value in values
-        ):
-            raise ValueError(f"{name} must contain {size} finite numbers")
-        return tuple(values)
 
     def _observation(self, observation, pose, time_s):
         if not isinstance(observation, Mapping):
@@ -354,14 +330,14 @@ class CoveragePolicy:
             quality = item.get("quality")
             detection = {"id": first_id + len(detections), "quality": quality}
             if quality == "precise":
-                detection["xy_m"] = self._coordinates(item.get("xy_m"), 2, "xy_m")
+                detection["xy_m"] = coordinates(item.get("xy_m"), 2, "xy_m")
                 if math.dist(pose[:2], detection["xy_m"]) > self.config.precision_range_m + EPS:
                     raise ValueError("A precise detection must be within precision_range_m")
             elif quality == "coarse" and self.config.cluster_radius_m is not None:
-                detection["xy_m"] = self._coordinates(item.get("xy_m"), 2, "xy_m")
+                detection["xy_m"] = coordinates(item.get("xy_m"), 2, "xy_m")
             elif quality == "bearing" and self.config.cluster_radius_m is None:
-                detection["origin_xy_m"] = self._coordinates(item.get("origin_xy_m"), 2, "origin_xy_m")
-                bearing, = self._coordinates([item.get("bearing_map_rad")], 1, "bearing_map_rad")
+                detection["origin_xy_m"] = coordinates(item.get("origin_xy_m"), 2, "origin_xy_m")
+                bearing, = coordinates([item.get("bearing_map_rad")], 1, "bearing_map_rad")
                 detection["bearing_map_rad"] = bearing
             else:
                 raise ValueError("Detection quality must be precise or bearing")
@@ -418,6 +394,13 @@ class CoveragePolicy:
             self.seen_headings.append(heading)
         return frame
 
+    @property
+    def memory(self):
+        if self._clusters is None:
+            return self._memory
+        coarse = {hint.id: {**asdict(hint), "quality": "coarse"} for hint in self._clusters.hints}
+        return {**self._memory, **coarse}
+
     def _capture_clusters(self):
         frame = yield from self._read_frame()
         for batch in (frame["detections"], *frame.get("supplemental_detections", ())):
@@ -426,113 +409,46 @@ class CoveragePolicy:
             self._record_checked_hints(frame)
         frame["known"] = list(self.memory.values())
         frame["deferred"] = []
-        frame["clusters"] = self._cluster_summary()
+        frame["clusters"] = self._clusters.summary(self.active_cluster)
         self.latest_frame = frame
         return frame
 
-    def _match_observations(self, detections, keys, tolerance):
-        # Match each observation and each remembered position at most once.
-        pairs = []
-        for item in detections:
-            for key in keys:
-                distance = math.dist(item["xy_m"], self.memory[key]["xy_m"])
-                if distance <= tolerance:
-                    pairs.append((distance, item["id"], key))
-        matches = {}
-        used = set()
-        for _, detection, key in sorted(pairs):
-            if key not in used and detection not in matches:
-                matches[detection] = key
-                used.add(key)
-        return matches
-
     def _merge_search_observations(self, detections, frame_index):
         precise = [item for item in detections if item["quality"] == "precise"]
-        coarse = [item for item in detections if item["quality"] == "coarse"]
-        measured = {key for key, item in self.memory.items() if item["quality"] == "precise"}
-        hints = self.memory.keys() - measured
-        precise_matches = self._match_observations(precise, measured, self.config.position_match_tolerance_m)
-        for item in precise:
-            self._remember_observation(item, precise_matches.get(item["id"]), frame_index)
-
-        coarse_matches = self._match_observations(coarse, hints, self.config.coarse_match_tolerance_m)
-        for item in coarse:
-            key = coarse_matches.get(item["id"])
-            if key in self.cluster_misses:
-                self.cluster_misses.discard(key)
-                self.cluster_attempts.discard(key)
-            point = item["xy_m"]
-            cluster = self.memory[key]["cluster_id"] if key is not None else None
-            radius = self.config.cluster_radius_m + EPS
-            if cluster is None or math.dist(point, self.cluster_anchors[cluster]) > radius:
-                cluster = min((cid for cid, anchor in self.cluster_anchors.items()
-                               if math.dist(point, anchor) <= radius),
-                              key=lambda cid: (math.dist(point, self.cluster_anchors[cid]), cid), default=None)
-            if cluster is None:
-                cluster = len(self.cluster_anchors) + 1
-                self.cluster_anchors[cluster] = point
-            self._remember_observation({**item, "cluster_id": cluster}, key, frame_index)
-
-    def _remember_observation(self, item, key, frame_index):
-        if key is None:
-            key = self.next_point_id
-            self.next_point_id -= 1
-        self.memory[key] = {**item, "id": key, "frame_index": frame_index}
-
-    def _cluster_summary(self):
-        groups = {}
-        for key, item in self.memory.items():
-            if item["quality"] == "coarse":
-                groups.setdefault(item["cluster_id"], []).append(key)
-        return [{"id": cid, "anchor_xy_m": self.cluster_anchors[cid], "remaining": len(keys),
-                 "pending": sum(key not in self.cluster_attempts for key in keys),
-                 "active": self.active_cluster == cid}
-                for cid, keys in groups.items()
-                if cid == self.active_cluster or cid not in self._visited_clusters]
+        positions = [item["xy_m"] for item in precise]
+        measured = {key: item["xy_m"] for key, item in self._memory.items()}
+        matches = match_positions(positions, measured, self.config.position_match_tolerance_m)
+        for index, item in enumerate(precise):
+            key = matches.get(index, item["id"])
+            self._memory[key] = {**item, "id": key, "frame_index": frame_index}
+        self._clusters.remember((item["xy_m"] for item in detections if item["quality"] == "coarse"),
+                                frame_index=frame_index)
 
     def _select_cluster_target(self, frame):
-        clusters = self._cluster_summary()
-        available = [c for c in clusters if c["pending"]]
-        if any(c["active"] for c in available):
-            return self._closest_cluster_hint()
-        if not available:
-            self.active_cluster = None
-            return None
-        candidates = {cluster["id"]: cluster for cluster in available}
-        # Pending counts and the vehicle pose can change while servicing a
-        # cluster. Build the priorities from the latest state at each pop.
-        queue = []
-        for cid, cluster in candidates.items():
-            distance, angle = relative(self.pose, cluster["anchor_xy_m"])
-            queue.append((-cluster["pending"], distance, abs(angle), cid))
-        heapq.heapify(queue)
-        selected = candidates[heapq.heappop(queue)[-1]]
-        self.active_cluster = selected["id"]
-        self._visited_clusters.add(self.active_cluster)
-        self._selected_clusters.append(CoverageCluster(
-            cluster_id=self.active_cluster, anchor_xy_m=selected["anchor_xy_m"],
-            radius_m=self.config.cluster_radius_m, pending_count=selected["pending"],
-        ))
-        self.decisions.append({"frame_index": frame["index"], "rule": "cluster_density",
-                               "selected": self.active_cluster,
-                               "candidates": [selected, *(candidates[cid] for *_, cid in queue)]})
-        return self._closest_cluster_hint()
-
-    def _closest_cluster_hint(self):
-        return min(
-            (key for key, item in self.memory.items()
-             if item.get("cluster_id") == self.active_cluster and key not in self.cluster_attempts),
-            key=lambda key: (relative(self.pose, self.memory[key]["xy_m"])[0]
-                             + .25 * abs(relative(self.pose, self.memory[key]["xy_m"])[1]), key),
-        )
+        hints = self._clusters.pending_hints(self.active_cluster)
+        if not hints:
+            candidates = [cluster for cluster in self._clusters.summary() if cluster["pending"]]
+            selected = self._clusters.next_cluster(self.pose)
+            if selected is None:
+                self.active_cluster = None
+                return None
+            self.active_cluster = selected.cluster_id
+            self._selected_clusters.append(selected)
+            candidates.sort(key=lambda cluster: cluster["id"] != self.active_cluster)
+            self.decisions.append({"frame_index": frame["index"], "rule": "cluster_density",
+                                   "selected": self.active_cluster, "candidates": candidates})
+            hints = selected.hints
+        return min(hints, key=lambda hint: (
+            relative(self.pose, hint.xy_m)[0] + .25 * abs(relative(self.pose, hint.xy_m)[1]), hint.id
+        )).id
 
     def _visit_cluster_target(self, key, frame):
         # Track the same spatial hypothesis through the fresh observations
         # after each short motion. Only the precise memory goes to _pickup().
-        start_distance = math.dist(self.pose[:2], self.memory[key]["xy_m"])
+        start_distance = math.dist(self.pose[:2], self._clusters.hint(key).xy_m)
         for _ in range(math.ceil(self.config.view_range_m / BEARING_STEP_M) + 2):
-            hint = self.memory[key]
-            distance, offset = relative(self.pose, hint["xy_m"])
+            hint = self._clusters.hint(key)
+            distance, offset = relative(self.pose, hint.xy_m)
             entry = {"frame_index": frame["index"], "pose": self.pose, "reference_id": key,
                      "cluster_id": self.active_cluster, "source": "cluster",
                      "yaw_rad": normalize(self.pose[2] + offset), "reason": None}
@@ -544,13 +460,13 @@ class CoveragePolicy:
                 result = yield from self._turn(entry["yaw_rad"])
                 if result["status"] == "success":
                     frame = yield from self._capture_clusters()
-                    if key in self.cluster_attempts or self.local_points():
+                    if not self._clusters.is_pending(key) or self.local_points():
                         return frame
                 else:
                     entry["reason"] = result["reason"]
                     break
-            hint = self.memory[key]
-            distance, offset = relative(self.pose, hint["xy_m"])
+            hint = self._clusters.hint(key)
+            distance, offset = relative(self.pose, hint.xy_m)
             if abs(offset) > min(MAX_SIDE_PROBE_TURN, math.radians(self.config.view_angle_deg / 2)):
                 continue
             if self._covered_cluster_miss(hint, frame):
@@ -567,26 +483,25 @@ class CoveragePolicy:
                 entry["reason"] = result["reason"]
             else:
                 break
-            if key in self.cluster_attempts or self.local_points():
+            if not self._clusters.is_pending(key) or self.local_points():
                 return frame
         else:
             # A remembered cluster may now be farther away than the camera
             # range. Give other rounds a chance to continue steady progress.
-            if math.dist(self.pose[:2], self.memory[key]["xy_m"]) <= start_distance - BEARING_STEP_M:
+            if math.dist(self.pose[:2], self._clusters.hint(key).xy_m) <= start_distance - BEARING_STEP_M:
                 return frame
             entry["reason"] = "cluster_approach_limit"
-        self.cluster_attempts.add(key)
+        self._clusters.mark_attempted(key)
         return frame
 
     def _record_checked_hints(self, frame):
-        for key, hint in self.memory.items():
-            if hint["quality"] == "coarse" and self._covered_cluster_miss(hint, frame):
-                self.cluster_attempts.add(key)
-                self.cluster_misses.add(key)
+        for hint in self._clusters.hints:
+            if self._covered_cluster_miss(hint, frame):
+                self._clusters.mark_attempted(hint.id, missed=True)
 
     def _covered_cluster_miss(self, hint, frame):
-        distance, offset = relative(frame["pose"], hint["xy_m"])
-        return (hint["frame_index"] != frame["index"] and distance <= self.config.precision_range_m
+        distance, offset = relative(frame["pose"], hint.xy_m)
+        return (hint.frame_index != frame["index"] and distance <= self.config.precision_range_m
                 and abs(offset) <= math.radians(.4 * frame["view_angle_deg"]))
 
     def _run_clusters(self):
@@ -600,7 +515,8 @@ class CoveragePolicy:
         for _ in range(self.config.maximum_rounds + sectors + 1):
             try:
                 if rounds >= self.config.maximum_rounds and (
-                    self.local_points() or any(cluster["pending"] for cluster in self._cluster_summary())
+                    self.local_points() or self._clusters.pending_hints(self.active_cluster)
+                    or self._clusters.is_next_cluster()
                 ):
                     return "round_limit"
                 success, _ = yield from self._pickup(frame)
@@ -624,10 +540,10 @@ class CoveragePolicy:
                 if not options:
                     if uncovered:
                         return "incomplete_final_scan"
-                    if any(item["quality"] == "precise" for item in self.memory.values()):
+                    if self._memory:
                         return "unresolved_precise_targets"
-                    unresolved = self.memory.keys() - self.cluster_misses
-                    return "unresolved_cluster_hints" if unresolved else "no_observed_targets"
+                    return ("unresolved_cluster_hints" if self._clusters.has_unresolved_hints()
+                            else "no_observed_targets")
                 yaw = min(options, key=lambda yaw: abs(normalize(yaw - self.pose[2])))
                 scanned.add(yaw)
                 self.decisions.append({"frame_index": frame["index"], "rule": "cluster_final_scan", "yaw": yaw})
@@ -645,31 +561,31 @@ class CoveragePolicy:
         half_view = math.radians(frame["view_angle_deg"] / 2)
         bearings = [item for item in frame["detections"] if item["quality"] == "bearing"]
         current_keys = {self.bearing_key(ray) for ray in bearings}
-        for key, item in list(self.memory.items()):
+        for key, item in list(self._memory.items()):
             if item["quality"] == "bearing" and (
                 item["station_xy_m"] != (x, y)
                 or abs(normalize(item["bearing_map_rad"] - heading)) <= half_view + EPS
             ):
                 if self.bearing_key(item) not in current_keys:
                     self.defer_bearing(item)
-                del self.memory[key]
-        available = {key for key, item in self.memory.items() if item["quality"] == "precise"}
+                del self._memory[key]
+        available = {key for key, item in self._memory.items() if item["quality"] == "precise"}
         for item in frame["detections"]:
             key = item["id"]
             if item["quality"] == "precise":
                 key = min(
-                    (key for key in self.memory if key in available
-                     and self._same_position(self.memory[key]["xy_m"], item["xy_m"])),
-                    key=lambda key: math.dist(self.memory[key]["xy_m"], item["xy_m"]), default=None,
+                    (key for key in self._memory if key in available
+                     and self._same_position(self._memory[key]["xy_m"], item["xy_m"])),
+                    key=lambda key: math.dist(self._memory[key]["xy_m"], item["xy_m"]), default=None,
                 )
                 if key is None:
                     key = self.next_point_id
                     self.next_point_id -= 1
                 available.discard(key)
-            self.memory[key] = {**item, "id": key}
+            self._memory[key] = {**item, "id": key}
             if item["quality"] == "bearing":
-                self.memory[key]["observed_s"] = frame["time_s"]
-                self.memory[key]["station_xy_m"] = (x, y)
+                self._memory[key]["observed_s"] = frame["time_s"]
+                self._memory[key]["station_xy_m"] = (x, y)
         for key in current_keys:
             self.deferred_bearings.pop(key, None)
             self.deferred_misses.discard(key)
@@ -684,7 +600,7 @@ class CoveragePolicy:
             else:
                 self.recent_bearings.append(((x, y), bearings))
                 self.recent_bearings = self.recent_bearings[-BEARING_HISTORY_STOPS:]
-        frame["known"] = list(self.memory.values())
+        frame["known"] = list(self._memory.values())
         frame["deferred"] = list(self.deferred_bearings.values())
         self.latest_frame = frame
         return frame
@@ -780,7 +696,7 @@ class CoveragePolicy:
 
     def local_points(self):
         radius = self.config.precision_range_m
-        return [item["xy_m"] for item in self.memory.values()
+        return [item["xy_m"] for item in self._memory.values()
                 if item["quality"] == "precise" and math.dist(self.pose[:2], item["xy_m"]) <= radius + EPS]
 
     def _recheck_deferred(self):
@@ -792,7 +708,7 @@ class CoveragePolicy:
         radius = p.precision_range_m + DEFERRED_RECHECK_DISTANCE
         half_view = math.radians(p.view_angle_deg / 2)
         width = 2 * half_view
-        active = [item["bearing_map_rad"] for item in self.memory.values() if item["quality"] == "bearing"]
+        active = [item["bearing_map_rad"] for item in self._memory.values() if item["quality"] == "bearing"]
         options = []
         for key, item in self.deferred_bearings.items():
             origin, bearing = key
@@ -940,12 +856,12 @@ class CoveragePolicy:
                         rays[:] = [ray for ray in rays if not any(
                             abs(relative((*ray["origin_xy_m"], ray["bearing_map_rad"]), point)[1]) <= MIN_TURN + EPS
                             for point in picked)]
-                    for key, hint in list(self.memory.items()):
+                    for key, hint in list(self._memory.items()):
                         if hint["quality"] == "bearing":
                             self.defer_bearing(hint)
-                            del self.memory[key]
+                            del self._memory[key]
                         elif hint["quality"] == "precise" and hint["xy_m"] in picked:
-                            del self.memory[key]
+                            del self._memory[key]
                             picked.remove(hint["xy_m"])
                     for key in list(self.deferred_bearings):
                         origin, bearing = key
@@ -980,7 +896,7 @@ class CoveragePolicy:
         success, pickup_reason = (yield from self._pickup(frame))
         if success:
             return success, pickup_reason
-        hints = self.memory.copy()
+        hints = self._memory.copy()
         points = {key: item["xy_m"] for key, item in hints.items() if item["quality"] == "precise"}
         bearings = {key: item["bearing_map_rad"] for key, item in hints.items()
                     if item["quality"] == "bearing" and item["station_xy_m"] == self.pose[:2]}
@@ -1037,7 +953,7 @@ class CoveragePolicy:
                     if not ok and reason != "no_safe_heading":
                         last_failure = reason
                 if not ok and self.pose[:2] == start_xy:
-                    return (last_failure or "no_safe_heading") if self.memory else "no_observed_targets"
+                    return (last_failure or "no_safe_heading") if self._memory else "no_observed_targets"
             except _RefreshObservation:
                 ok = False
             if ok:
@@ -1061,7 +977,7 @@ class CoveragePolicy:
         while True:
             x, y, heading = self.pose
             bearings = []
-            for item in self.memory.values():
+            for item in self._memory.values():
                 if item["quality"] == "precise":
                     px, py = item["xy_m"]
                     bearings.append(math.atan2(py - y, px - x))

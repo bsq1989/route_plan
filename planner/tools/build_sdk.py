@@ -23,7 +23,7 @@ def build(output: Path):
     package = destination / "src" / "route_plan_sdk"
     package.mkdir(parents=True)
     for name in ("api.py", "core.py", "length.py", "stops.py", "motion.py", "ompl_motion.py", "records.py",
-                 "escape.py", "adjustment.py", "observation.py", "direction_policy.py"):
+                 "escape.py", "adjustment.py", "observation.py", "cluster_memory.py", "direction_policy.py"):
         source = (root / "planner" / "src" / "route_plan_planner" / name).read_text()
         # Move only imports of the maintained geometry kernel into a private
         # namespace. All algorithm imports remain relative and unchanged.
@@ -35,12 +35,14 @@ def build(output: Path):
         'from .escape import EscapeResponse, plan_escape\n'
         'from .adjustment import plan_pickup_adjustment\n'
         'from .observation import CoarseTarget, ObservationResponse, plan_observation_step\n'
-        'from .direction_policy import CoverageAction, CoverageCluster, CoverageConfig, CoveragePolicy\n'
+        'from .cluster_memory import ClusterHint, ClusterMemory, CoverageCluster\n'
+        'from .direction_policy import CoverageAction, CoverageConfig, CoveragePolicy\n'
         f'__version__ = "{version}"\n'
         '__all__ = ["Target", "PlanningRequest", "PlanningResponse", "PlanStep", "PickupStop", "plan",\n'
         '           "EscapeResponse", "plan_escape", "plan_pickup_adjustment",\n'
         '           "CoarseTarget", "ObservationResponse", "plan_observation_step",\n'
-        '           "CoverageAction", "CoverageCluster", "CoverageConfig", "CoveragePolicy", "__version__"]\n')
+        '           "ClusterHint", "ClusterMemory", "CoverageAction", "CoverageCluster", "CoverageConfig",\n'
+        '           "CoveragePolicy", "__version__"]\n')
     geometry = package / "_geometry"
     geometry.mkdir()
     for name in ("__init__.py", "scene.py", "boundary.py", "config.py", "control.py"):

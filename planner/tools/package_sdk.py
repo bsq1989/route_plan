@@ -29,7 +29,7 @@ def check_wheel(path, project):
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
         required = {"route_plan_sdk/__init__.py", "route_plan_sdk/api.py", "route_plan_sdk/observation.py",
-                    "route_plan_sdk/direction_policy.py",
+                    "route_plan_sdk/cluster_memory.py", "route_plan_sdk/direction_policy.py",
                     "route_plan_sdk/_geometry/boundary.py",
                     "route_plan_sdk/_geometry/config/robot.yaml", "route_plan_sdk/_geometry/world.yaml"}
         if not required.issubset(names):
