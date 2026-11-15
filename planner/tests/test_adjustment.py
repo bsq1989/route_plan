@@ -47,6 +47,15 @@ class PickupAdjustmentTest(unittest.TestCase):
         self.verify(result, ["item"], [], limit=0.)
         self.assertGreater(abs(result.final_pose[2]), math.radians(1.))
 
+    def test_polygon_adjustment_prefers_clear_stop_with_in_place_turn(self):
+        request = dict(pose=(0., 0., 0.), mode="auto_fence", timeout=1.,
+                       fence=[[-1, -1], [1.5, -1], [1.5, 1.5], [-1, 1.5]],
+                       targets=[dict(id="item", x=.45, y=.39), dict(id="neighbor", x=1.1, y=-.4)])
+        result = plan_pickup_adjustment(request, ["item"], max_displacement=0.)
+        self.verify(result, ["item"], ["neighbor"], limit=0.)
+        self.assertGreaterEqual(result.metrics["min_pickup_clearance_m"], .03)
+        self.assertGreaterEqual(result.metrics["min_near_edge_clearance_m"], .03)
+
     def test_already_covered_batch_is_picked_at_the_measured_pose(self):
         request = self.request(Target("a", 3.58, 4.45), Target("b", 3.60, 4.54))
         result = plan_pickup_adjustment(request, ["a", "b"])

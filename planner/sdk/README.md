@@ -1,6 +1,6 @@
 # Route Plan 纯算法 SDK
 
-`route-plan-sdk 0.2.16`，Python 导入名为 `route_plan_sdk`。输入场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。提供有状态的 `CoveragePolicy`，用于由 Gateway 执行远近观测和拾取动作。
+`route-plan-sdk 0.2.17`，Python 导入名为 `route_plan_sdk`。输入场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。提供有状态的 `CoveragePolicy`，用于由 Gateway 执行远近观测和拾取动作。
 
 包内包含任务规划、路径长度优化与必要的私有几何校验内核。没有 IR-SIM、窗口、绘图、动画、场景演示、ROS 或实车控制功能。无需原仓库目录或 `PYTHONPATH`，默认车型文件已随包携带。
 
@@ -29,10 +29,10 @@ source .venv/bin/activate
 python -m pip install .
 
 # 或安装提供的 SDK wheel，二者任选一个
-python -m pip install /完整路径/route_plan_sdk-0.2.16-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.17-py3-none-any.whl
 ```
 
-源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.16`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
+源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.17`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
 
 ## 最小 Python 调用
 
@@ -231,6 +231,8 @@ else:
 把附近其他未拾取目标也放在 `targets` 里，它们会参与全程碰撞检查。`max_displacement` 是车辆参考点距起点的最大距离，单位米，默认 0.40。平移和转向沿用停靠模式的死区。
 
 成功时返回一个拾取停靠，指定的全部 ID 都在该位姿的消除区域内。如果它们已经在区内，可以直接原地拾取。`remaining_ids` 保留该停靠未清除的目标。拾取确认后，剩余任务用实测位姿和最新目标重新规划。
+
+需要对位移动时，规划会优先留出消除区内侧余量，尤其是朝向车身的近边。这个偏好和移动代价一起参与选点。响应的 `metrics.min_near_edge_clearance_m` 和 `metrics.min_pickup_clearance_m` 分别给出目标圆心距近边的最小纵向间隔和距任意边的最小距离，单位都是米。到位后用实测位姿下的新观测确认圆心进区，再执行拾取。
 
 起点有物体侵入安全外扩区时，接口先尝试脱困，再规划拾取。脱困时保持实体车身与侵入物的净空，已退出外扩区的物体恢复常规碰撞检查。`metrics.escape_goal_count` 标出 `goals` 开头有几条脱困动作。脱困和对位共用局部位移上限。物体触碰实体车身时返回 `body_contact`，找不到安全的完整路线时返回空动作。
 

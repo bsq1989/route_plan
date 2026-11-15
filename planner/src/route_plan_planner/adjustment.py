@@ -5,10 +5,11 @@ import math
 import time
 from typing import Iterable, Mapping
 
+from route_plan_sim.boundary import PolygonFootprint
 from route_plan_sim.scene import EPS, normalize
 
-from .api import (PickupStop, PlanningRequest, PlanningResponse, PlanStep, TargetId, _empty_scene, _number,
-                  _robot_profile, _workspace_padding)
+from .api import (DEFAULT_PICKUP_MARGIN_M, PickupStop, PlanningRequest, PlanningResponse, PlanStep, TargetId,
+                  _empty_scene, _number, _robot_profile, _workspace_padding)
 from .escape import _escape_approaches
 from .motion import MIN_TRANSLATION, compact_goals, path_length, replay, steer
 from .records import describe_scene
@@ -68,6 +69,19 @@ def _offsets(lower, upper):
     return values
 
 
+def _near_edge_clearance(collector, x, y):
+    if isinstance(collector, PolygonFootprint):
+        return next((max(0., x - left) for left, right in collector.longitudinal_spans(y)
+                     if left - EPS <= x <= right + EPS), 0.)
+    return max(0., x - collector.xmin)
+
+
+def _pickup_clearance(collector, x, y):
+    if isinstance(collector, PolygonFootprint):
+        return min(edge.distance((x, y)) for edge in collector.polygon.edges)
+    return min(x - collector.xmin, collector.xmax - x, y - collector.ymin, collector.ymax - y)
+
+
 def _candidate_poses(scene, points, origin, limit, deadline):
     x, y, yaw = scene.pose
     offsets = [(tx - x, ty - y) for tx, ty in points]
@@ -91,8 +105,9 @@ def _candidate_poses(scene, points, origin, limit, deadline):
             mid_u, mid_v = (min(u) + max(u)) / 2, (min(v) + max(v)) / 2
             offsets_in_heading.extend((mid_u - a, mid_v - b) for a, b in samples)
         for a, b in offsets_in_heading:
-            if (samples is not None or margin) and not all(
-                    scene.covers_pickup_center(p - a, q - b) for p, q in zip(u, v)):
+            local_centres = [(p - a, q - b) for p, q in zip(u, v)]
+            if (samples is not None or margin) and not all(scene.covers_pickup_center(*point)
+                                                          for point in local_centres):
                 continue
             distance = math.hypot(a, b)
             dx, dy = c * a - s * b, s * a + c * b
@@ -100,8 +115,13 @@ def _candidate_poses(scene, points, origin, limit, deadline):
                 continue
             approach = math.atan2(dy, dx) if distance > EPS else yaw
             turns = abs(normalize(approach - yaw)) + abs(normalize(angle - approach))
-            clearance = min(a - left, right - a, b - bottom, top - b)
-            poses[x + dx, y + dy, angle] = (distance + .12 * turns, -clearance)
+            near_clearance = min(_near_edge_clearance(box, *point) for point in local_centres)
+            clearance = min(_pickup_clearance(box, *point) for point in local_centres)
+            # A bounded preference discourages edge-hugging without making
+            # clearance a new pickup constraint or rewarding long detours.
+            near_penalty = 2 * max(0., DEFAULT_PICKUP_MARGIN_M - near_clearance)
+            edge_penalty = max(0., DEFAULT_PICKUP_MARGIN_M - clearance)
+            poses[x + dx, y + dy, angle] = (distance + .12 * turns + near_penalty + edge_penalty, -clearance)
     return sorted(poses, key=lambda pose: (poses[pose], pose))
 
 
@@ -205,6 +225,11 @@ def plan_pickup_adjustment(
         response.remaining_ids = [id_map[key] for key in at_stop.targets]
         response.final_pose = _translate_pose(at_stop.pose, simulation.pose, request.pose)
         response.length = length
+        centres = [at_stop.local_point(*observed[key]) for key in requested]
+        response.metrics["min_near_edge_clearance_m"] = min(
+            _near_edge_clearance(at_stop.collector, *point) for point in centres)
+        response.metrics["min_pickup_clearance_m"] = min(
+            _pickup_clearance(at_stop.collector, *point) for point in centres)
         if escape_goal_count:
             response.metrics["escape_goal_count"] = escape_goal_count
         return True

@@ -237,6 +237,26 @@ class PolygonFootprint:
     def contains(self, x, y):
         return self.intersects_circle(x, y, 0.)
 
+    def longitudinal_spans(self, y):
+        """Closed forward-axis intervals inside the polygon at lateral offset y."""
+        crossings, spans = [], []
+        for edge in self.polygon.edges:
+            ax, ay = edge.start
+            bx, by = edge.end
+            if (ay > y) != (by > y):
+                crossings.append(ax + (bx - ax) * ((y - ay) / (by - ay)))
+            elif abs(ay - y) <= EPS and abs(by - y) <= EPS:
+                spans.append((min(ax, bx), max(ax, bx)))
+        crossings.sort()
+        spans.extend(zip(crossings[::2], crossings[1::2]))
+        merged = []
+        for left, right in sorted(spans):
+            if merged and left <= merged[-1][1] + EPS:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], right))
+            else:
+                merged.append((left, right))
+        return merged
+
     @property
     @lru_cache(maxsize=16)
     def pickup_samples(self):
@@ -244,11 +264,9 @@ class PolygonFootprint:
         result = []
         for fraction in (.8, .6, .4, .2):
             y = self.ymin + fraction * (self.ymax - self.ymin)
-            limits = sorted(ax + (bx - ax) * ((y - ay) / (by - ay))
-                            for (ax, ay), (bx, by) in ((e.start, e.end) for e in self.polygon.edges)
-                            if (ay > y) != (by > y))
-            for left, right in zip(limits[::2], limits[1::2]):
-                result.extend((left + part * (right - left), y) for part in (.85, .5))
+            for left, right in self.longitudinal_spans(y):
+                if right - left > EPS:
+                    result.extend((left + part * (right - left), y) for part in (.85, .5))
         return tuple(result)
 
     def intersects_circle(self, x, y, radius):
