@@ -16,6 +16,7 @@ from .records import describe_scene
 
 ADJUSTMENT_METHOD = "pickup-adjustment-v1"
 DEFAULT_MAX_DISPLACEMENT = .40
+SIDE_PICKUP_PENALTY_M = .06
 
 
 def _translate_pose(pose, source, destination):
@@ -121,7 +122,12 @@ def _candidate_poses(scene, points, origin, limit, deadline):
             # clearance a new pickup constraint or rewarding long detours.
             near_penalty = 2 * max(0., DEFAULT_PICKUP_MARGIN_M - near_clearance)
             edge_penalty = max(0., DEFAULT_PICKUP_MARGIN_M - clearance)
-            poses[x + dx, y + dy, angle] = (distance + .12 * turns + near_penalty + edge_penalty, -clearance)
+            side_penalty = 0.
+            if scene.center_collector is not None:
+                side_count = sum(not scene.prefers_pickup_center(*point) for point in local_centres)
+                side_penalty = SIDE_PICKUP_PENALTY_M * side_count / len(local_centres)
+            cost = distance + .12 * turns + near_penalty + edge_penalty + side_penalty
+            poses[x + dx, y + dy, angle] = (cost, -clearance)
     return sorted(poses, key=lambda pose: (poses[pose], pose))
 
 
@@ -230,6 +236,8 @@ def plan_pickup_adjustment(
             _near_edge_clearance(at_stop.collector, *point) for point in centres)
         response.metrics["min_pickup_clearance_m"] = min(
             _pickup_clearance(at_stop.collector, *point) for point in centres)
+        if at_stop.center_collector is not None:
+            response.metrics["center_pickup_count"] = sum(at_stop.prefers_pickup_center(*point) for point in centres)
         if escape_goal_count:
             response.metrics["escape_goal_count"] = escape_goal_count
         return True

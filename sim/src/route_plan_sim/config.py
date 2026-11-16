@@ -46,6 +46,8 @@ def load_config(world_path: Path, robot_path: str | Path | None = None) -> tuple
             if not body_polygon.polygon.contains_disk(0., 0.):
                 raise ValueError("Body polygon must contain the pose reference in its interior")
         polygon = PolygonFootprint.from_points(collector["polygon"]) if "polygon" in collector else None
+        center_polygon = (PolygonFootprint.from_points(collector["center_polygon"])
+                          if "center_polygon" in collector else None)
         length = body["length"] if body_polygon is None else body_polygon.xmax - body_polygon.xmin
         width = body["width"] if body_polygon is None else body_polygon.ymax - body_polygon.ymin
         raw = {"body_length": length, "body_width": width,
@@ -97,6 +99,8 @@ def load_config(world_path: Path, robot_path: str | Path | None = None) -> tuple
                                "lateral_offset": values["collector_offset"]}
         if "collector_gap" in values:
             custom["collector"]["gap"] = values["collector_gap"]
+    if center_polygon is not None:
+        custom["collector"]["center_polygon"] = center_polygon.corners
     for key in ("body_margin", "forward_speed", "angular_speed"):
         custom[key] = values[key]
     return merged, path

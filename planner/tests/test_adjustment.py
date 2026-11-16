@@ -56,6 +56,13 @@ class PickupAdjustmentTest(unittest.TestCase):
         self.assertGreaterEqual(result.metrics["min_pickup_clearance_m"], .03)
         self.assertGreaterEqual(result.metrics["min_near_edge_clearance_m"], .03)
 
+    def test_polygon_adjustment_prioritizes_the_center_when_moving(self):
+        request = dict(pose=(0., 0., 0.), mode="auto_fence", timeout=1.,
+                       targets=[dict(id="item", x=.60, y=-.42)])
+        result = plan_pickup_adjustment(request, ["item"])
+        self.verify(result, ["item"], [])
+        self.assertEqual(result.metrics["center_pickup_count"], 1)
+
     def test_already_covered_batch_is_picked_at_the_measured_pose(self):
         request = self.request(Target("a", 3.58, 4.45), Target("b", 3.60, 4.54))
         result = plan_pickup_adjustment(request, ["a", "b"])

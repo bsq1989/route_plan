@@ -86,6 +86,16 @@ class PickupStopsTest(unittest.TestCase):
         self.assertEqual(result.goals, [(0., 0., 0.)])
         self.assertEqual(result.pickup_stops[0].target_ids, ("left",))
 
+    def test_stop_selection_prefers_the_center_for_an_approach(self):
+        request = dict(pose=[0., 0., 0.], mode="auto_fence", method="stops",
+                       targets=[dict(id="item", x=.70, y=-.15)], timeout=1., use_ompl=False)
+        result = plan(request)
+        self.assertTrue(result.success, result.reason)
+        self.assertEqual(result.stop_count, 1)
+        self.assertEqual(result.optimization["center_pickup_count"], 1)
+        self.assertEqual(result.optimization["side_pickup_count"], 0)
+        self.assertIn("center_polygon", result.resolved_request["robot_config"]["collector"])
+
     def test_initial_tool_coverage_is_one_explicit_stop_not_zero(self):
         result = plan(dict(width=12, height=9, pose=[3, 4.5, 0],
                            targets=[dict(id="initial", x=3.55, y=4.5)], method="stops", timeout=.5))

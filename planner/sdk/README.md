@@ -1,6 +1,6 @@
 # Route Plan 纯算法 SDK
 
-`route-plan-sdk 0.2.18`，Python 导入名为 `route_plan_sdk`。输入场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。提供有状态的 `CoveragePolicy`，用于由 Gateway 执行远近观测和拾取动作。
+`route-plan-sdk 0.2.19`，Python 导入名为 `route_plan_sdk`。输入场地、车辆位姿和圆形目标列表，输出经过几何验证的有序 map 目标位姿。提供有状态的 `CoveragePolicy`，用于由 Gateway 执行远近观测和拾取动作。
 
 包内包含任务规划、路径长度优化与必要的私有几何校验内核。没有 IR-SIM、窗口、绘图、动画、场景演示、ROS 或实车控制功能。无需原仓库目录或 `PYTHONPATH`，默认车型文件已随包携带。
 
@@ -29,10 +29,10 @@ source .venv/bin/activate
 python -m pip install .
 
 # 或安装提供的 SDK wheel，二者任选一个
-python -m pip install /完整路径/route_plan_sdk-0.2.18-py3-none-any.whl
+python -m pip install /完整路径/route_plan_sdk-0.2.19-py3-none-any.whl
 ```
 
-源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.18`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
+源码开发可使用 `python -m pip install -e /完整路径/route-plan-sdk-0.2.19`。不需要同时安装原仓库的 `sim/` 或 `planner/` 工程。
 
 ## 最小 Python 调用
 
@@ -234,6 +234,8 @@ else:
 
 需要对位移动时，规划会优先留出消除区内侧余量，尤其是朝向车身的近边。这个偏好和移动代价一起参与选点。响应的 `metrics.min_near_edge_clearance_m` 和 `metrics.min_pickup_clearance_m` 分别给出目标圆心距近边的最小纵向间隔和距任意边的最小距离，单位都是米。到位后用实测位姿下的新观测确认圆心进区，再执行拾取。
 
+车辆配置含 `collector.center_polygon` 时，局部对位移动的选点也会优先覆盖中间观察位。`metrics.center_pickup_count` 给出这次指定的目标中预计能从中间观察位拾取的数量。
+
 起点有物体侵入安全外扩区时，接口先尝试脱困，再规划拾取。脱困时保持实体车身与侵入物的净空，已退出外扩区的物体恢复常规碰撞检查。`metrics.escape_goal_count` 标出 `goals` 开头有几条脱困动作。脱困和对位共用局部位移上限。物体触碰实体车身时返回 `body_contact`，找不到安全的完整路线时返回空动作。
 
 ## 输入约定
@@ -260,6 +262,8 @@ else:
 局部圆示例可直接调用 `plan({"mode": "auto_fence", "auto_fence_radius_m": 1.4, "method": "stops", "pose": [0, 0, 0], "targets": [{"id": "cup", "x": 1.2, "y": 0}]})`。近距拾取由调用端先按本轮实测 `base_link` 和可靠观测范围选目标。SDK 会尝试清除传入的全部目标。下一次调用传入新的实测 `pose`，就会生成新的圆心。执行前，调用端要核对实际下发的路径仍在圆内，并结合当前感知检查沿途占用。
 
 `stops` 模式只在指定拾取停靠位消除目标，沿途和转向时不自动删除。即使目标一开始就在消除区，也需要一个显式拾取停靠。v0.2.1 起，合并一批的每个目标圆心都必须位于同一位置、同一朝向下的消除区域内（含圆心在边界上，仅容许数值误差）；圆边缘相切或部分重叠、圆心在外均不算覆盖。不要求整个圆都进入。碰撞始终按完整圆计算并优先处理。目标在该停靠之前一直作为障碍；途中先后经过多个目标不会被算作“一停全清”。
+
+`collector.center_polygon` 是可选的中间观察位多边形，坐标系和单位与 `collector.polygon` 相同。默认车型包含该字段。停靠次数相同时，停靠规划优先使更多目标圆心进入中区且满足拾取余量。如果当前位姿已经覆盖全部目标，可以原地拾取。仍使用整个消除区判断可拾取性，左右区域都可以参加合并。`optimization.center_pickup_count` 和 `optimization.side_pickup_count` 分别记录中区与侧区的目标数。
 
 旧接触模式仍按重叠连通组清除，保留原始 ID。`stops` 模式逐 ID 检查圆心；彼此重叠的多个目标可以同时拾取，但区域外的圆心不能因为重叠关系被顺带清除，必要时分批处理。所有未清除圆都参与碰撞检查，不能用质心替代整组碰撞范围。
 

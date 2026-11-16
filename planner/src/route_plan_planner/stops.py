@@ -188,6 +188,7 @@ class _Candidate:
     pose: tuple[float, float, float]
     covered: frozenset[int]
     blocked: frozenset[int]
+    centered: frozenset[int]
 
 
 class StopsPlanner:
@@ -202,18 +203,20 @@ class StopsPlanner:
         if not scene.contains_motion_point(x, y):
             return None
         c, s = math.cos(yaw), math.sin(yaw)
-        covered, blocked = set(), set()
+        covered, blocked, centered = set(), set(), set()
         for key, (tx, ty) in scene.targets.items():
             u, v = c * (tx - x) + s * (ty - y), -s * (tx - x) + c * (ty - y)
             if scene.covers_pickup_center(u, v):
                 covered.add(key)
+                if scene.prefers_pickup_center(u, v):
+                    centered.add(key)
             if scene.safety_body.intersects_circle(u, v, scene.target_radius):
                 blocked.add(key)
         if covered:
             # The connector still checks both swept footprints along each motion.
             scene.pose = pose
             if not math.isfinite(scene._wall_contact(0., 0.)):
-                return _Candidate(pose, frozenset(covered), frozenset(blocked))
+                return _Candidate(pose, frozenset(covered), frozenset(blocked), frozenset(centered))
         return None
 
     def _boundary_candidates(self, scene, candidates, deadline):
@@ -309,6 +312,17 @@ class StopsPlanner:
                 best = _executable_seed(root, seed, connector, deadline)
         baseline_count = len(best.pickup_stops) if best else None
         baseline_length = best.length if best else None
+        already_in_pickup_pose = best is not None and best.goals == [root.pose]
+        prefer_center = root.center_collector is not None
+        best_score = (baseline_count, 0) if best is not None else None
+        if prefer_center and best is not None:
+            at_stop = root.clone()
+            side_count = 0
+            for stop in best.pickup_stops:
+                at_stop.pose = stop["pose"]
+                side_count += sum(not at_stop.prefers_pickup_center(*at_stop.local_point(*root.targets[key]))
+                                  for key in stop["target_ids"])
+            best_score = (baseline_count, side_count)
         stats = {"method": STOPS_METHOD, "objective": ["pickup_stop_count"],
                  "pickup_rule": "center",
                  "seed_status": initial.status, "seed_elapsed": initial.elapsed,
@@ -316,6 +330,8 @@ class StopsPlanner:
                  "stop_count": baseline_count, "improvements": 0, "global_optimal": False,
                  "candidate_count": 0, "trials": 0, "expanded": 0, "ompl_calls": 0, "ompl_connections": 0,
                  "termination": "candidates_exhausted"}
+        if prefer_center:
+            stats["objective"].append("side_pickup_count")
         pool_deadline = min(deadline, time.monotonic() + max(0., deadline - time.monotonic()) * .3)
         pool = self._pool(root, pool_deadline, seed)
         stats["candidate_count"] = len(pool)
@@ -330,7 +346,8 @@ class StopsPlanner:
         if self.options.ompl:
             from .ompl_motion import OmplMotion
             fallback = OmplMotion(min(.15, self.options.ompl_seconds), self.options.seed, minimum_motion=True)
-        layer = [(root, [], [])]
+        layer = [(root, [], [], 0)]
+        candidate_by_pose = {candidate.pose: candidate for candidate in pool} if prefer_center else {}
         seen = {}
         ompl_only = False
         trial_budget = max(0, self.options.max_trials - initial.trials)
@@ -342,10 +359,10 @@ class StopsPlanner:
             # approaches before spending time on random detours.
             direct = None if ompl_only else connector
             local_fallback = fallback if ompl_only or not wide_search else None
-            for current, goals, stops in layer:
+            for current, goals, stops, side_count in layer:
                 if time.monotonic() >= deadline or stats["expanded"] >= expansion_budget:
                     break
-                if best is not None and len(stops) + 1 >= len(best.pickup_stops):
+                if already_in_pickup_pose or (best_score is not None and (len(stops) + 1, side_count) >= best_score):
                     continue
                 stats["expanded"] += 1
                 remaining = frozenset(current.targets)
@@ -356,14 +373,20 @@ class StopsPlanner:
                         continue
                     distance = math.dist(current.pose[:2], candidate.pose[:2])
                     bucket = choices.setdefault(coverage, [])
-                    bucket.append((distance, candidate.pose))
+                    bucket.append((len(coverage - candidate.centered) if prefer_center else 0, distance, candidate.pose))
                 proposals = []
                 for coverage, values in choices.items():
-                    for distance, pose in sorted(values)[:approaches_per_batch]:
-                        proposals.append((-len(coverage), distance, pose))
+                    ranked = sorted(values)[:approaches_per_batch]
+                    if prefer_center:
+                        # Preserve a short alternative when the central approach leads to a dead end.
+                        shortest = min(values, key=lambda value: value[1:])
+                        if shortest not in ranked:
+                            ranked[-1] = shortest
+                    for side, distance, pose in ranked:
+                        proposals.append((-len(coverage), side, distance, pose))
                 proposals.sort()
                 accepted = 0
-                poses = [pose for _, _, pose in proposals[:proposal_limit]]
+                poses = [pose for _, _, _, pose in proposals[:proposal_limit]]
                 for transition in _connect_proposals(current, poses, direct, local_fallback, deadline, stats, trial_budget):
                     child = transition.scene
                     removed = child.collect_at_stop()
@@ -375,8 +398,18 @@ class StopsPlanner:
                     child_goals = goals + segment
                     child_stops = stops + [{"goal_index": len(child_goals) - 1, "pose": tuple(child_goals[-1]),
                                             "target_ids": list(removed)}]
+                    child_side_count = side_count
+                    if prefer_center:
+                        candidate = candidate_by_pose.get(tuple(child.pose))
+                        if candidate is not None:
+                            child_side_count += len(set(removed) - candidate.centered)
+                        else:
+                            child_side_count += sum(
+                                not child.prefers_pickup_center(*child.local_point(*child.collected[key]))
+                                for key in removed)
+                    value = (len(child_stops), child_side_count)
                     if not child.targets:
-                        if best is None or len(child_stops) < len(best.pickup_stops):
+                        if best_score is None or value < best_score:
                             try:
                                 checked = replay(root, child_goals, pickup_stops=child_stops, minimum_motion=True)
                             except ValueError:
@@ -386,16 +419,16 @@ class StopsPlanner:
                                 best.status, best.reason = "success", None
                                 best.diagnostic = None
                                 best.goals, best.pickup_stops = child_goals, child_stops
+                                best_score = value
                                 stats["improvements"] += 1
                         continue
                     key = StaticPlanner._key(child, 0)
-                    value = len(child_stops)
                     if key in seen and seen[key] <= value:
                         continue
                     seen[key] = value
                     maximum = max((len(candidate.covered & child.targets.keys()) for candidate in pool), default=1)
                     estimate = len(child_stops) + math.ceil(len(child.targets) / max(1, maximum))
-                    next_layer.append((estimate, len(child.targets), child, child_goals, child_stops))
+                    next_layer.append((estimate, len(child.targets), child_side_count, child, child_goals, child_stops))
                     accepted += 1
                     if accepted >= beam_width:
                         break
@@ -403,8 +436,8 @@ class StopsPlanner:
                 ompl_only = True
                 continue
             ompl_only = False
-            next_layer.sort(key=lambda item: item[:2])
-            layer = [(child, goals, stops) for _, _, child, goals, stops in next_layer[:beam_width]]
+            next_layer.sort(key=lambda item: item[:3])
+            layer = [(child, goals, stops, side) for _, _, side, child, goals, stops in next_layer[:beam_width]]
         if best is None:
             exhausted = (time.monotonic() >= deadline or stats["trials"] >= trial_budget
                          or stats["expanded"] >= expansion_budget)
@@ -435,6 +468,9 @@ class StopsPlanner:
         best.optimization = stats
         stats["stop_count"] = len(best.pickup_stops)
         stats["saved_stops"] = baseline_count - len(best.pickup_stops) if baseline_count is not None else None
+        if prefer_center:
+            stats["side_pickup_count"] = best_score[1]
+            stats["center_pickup_count"] = len(root.targets) - best_score[1]
         return best
 
     def _plan_after_escape(self, scene, initial, started, shared_elapsed, deadline):

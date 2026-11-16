@@ -198,6 +198,8 @@ class Scene:
             raise ValueError("Body margin must be nonnegative")
         custom["body_margin"] = self.body_margin
         tool = custom["collector"]
+        self.center_collector = (PolygonFootprint.from_points(tool["center_polygon"])
+                                 if "center_polygon" in tool else None)
         if "polygon" in tool:
             self.collector = PolygonFootprint.from_points(tool["polygon"])
             self.collector_gap = self.collector.xmin - front
@@ -249,8 +251,8 @@ class Scene:
         This does not construct a viewer or change the original episode.
         """
         result = copy(self)
-        points = self.config["custom"]["collector"].get("polygon")
-        immutable = {id(points): points} if isinstance(self.collector, PolygonFootprint) and points is self.collector.corners else {}
+        immutable = {id(shape.corners): shape.corners for shape in (self.collector, self.center_collector)
+                     if isinstance(shape, PolygonFootprint)}
         result.config = deepcopy(self.config, immutable)
         result.targets = self.targets.copy()
         result.collected = self.collected.copy()
@@ -275,7 +277,13 @@ class Scene:
 
     def covers_pickup_center(self, x: float, y: float) -> bool:
         """Test a target centre in the vehicle frame against the pickup inset."""
-        tool = self.collector
+        return self._covers_pickup(self.collector, x, y)
+
+    def prefers_pickup_center(self, x: float, y: float) -> bool:
+        """Give credit for a union-covered target also inside the centre observation zone."""
+        return self.center_collector is not None and self._covers_pickup(self.center_collector, x, y)
+
+    def _covers_pickup(self, tool, x, y):
         margin = self.pickup_margin_m
         if not margin:
             return tool.contains(x, y)
