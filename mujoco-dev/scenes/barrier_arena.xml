@@ -16,6 +16,8 @@
     <material name="floor_tiles" texture="floor_tiles" texuniform="true" texrepeat="3 3" specular="0.06"/>
   </asset>
   <worldbody>
+    <camera name="arena_overview" pos="3 -5.8 5.15" fovy="35" resolution="1000 700"
+            xyaxes="0.8882 0.4594 0 -0.2776 0.5368 0.7968"/>
     <light name="key" pos="1 -0.8 4.5" dir="-1 0.8 -4.5"
            diffuse="0.65 0.65 0.65" specular="0.30 0.30 0.30"/>
     <geom name="floor" type="plane" size="30 30 0.1" material="floor_tiles" contype="1" conaffinity="2"/>

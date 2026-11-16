@@ -1,0 +1,3 @@
+/sim/diff_drive_controller:
+  ros__parameters:
+    linear.x.min_velocity: -0.15

@@ -55,4 +55,44 @@ uv run --project mujoco-dev python mujoco-dev/check_model.py
 
 [围栏试验场景](scenes/barrier_arena.xml)用 10 段护栏和 10 根共用立柱围成闭合矩形。长边 3 段、短边 2 段，按立柱中心线计为 4.44 × 2.96 m。官方 Tracer 2.0 裸底盘从场地中央起步。场景引用生成的 `model/scene_tracer.xml`，可直接用 MuJoCo 打开。
 
+## ROS 2 Jazzy 容器
+
+从仓库根目录执行以下命令。容器以无窗口模式运行 MuJoCo 物理引擎和 ROS 2 差速控制器，直接加载本机现有的 `scenes/barrier_arena.xml` 和 `model/`。在新检出的仓库中，如果 `model/` 尚未生成，先按上文准备模型。
+
+```bash
+docker build -t route-plan-mujoco:jazzy mujoco-dev/ros2
+docker run -d --init --name route-plan-mujoco-ros2 \
+  --mount "type=bind,source=$PWD/mujoco-dev,target=/workspace/mujoco-dev,readonly" \
+  route-plan-mujoco:jazzy
+```
+
+控制器启动后，下面的指令会以 10 Hz 向仿真底盘发送 20 条前进速度消息。速度超时为 0.5 s，常规启动时车体前向速度下限为 0。
+
+```bash
+docker exec route-plan-mujoco-ros2 /ros_entrypoint.sh \
+  ros2 topic pub --times 20 -r 10 /sim/cmd_vel geometry_msgs/msg/TwistStamped \
+  '{twist: {linear: {x: 0.2}}}'
+```
+
+`/sim/odom` 是轮式里程计，控制器发布 `odom → base_link`。MuJoCo 的车身真值独立发布在 `/sim/ground_truth/odom`。查看启动和控制器日志可用 `docker logs route-plan-mujoco-ros2`。
+
+### 网页手动驾驶
+
+网页模式下，MuJoCo 的物理和 OpenGL 渲染由 Mac 上的原生进程运行。Docker 运行 ROS 2、差速控制器和网页服务，通过 ROS 关节话题桥接左右轮速度指令与反馈。本地两个服务都绑定到回环地址。
+
+从仓库根目录构建前端和容器镜像。切换模式时，先停止并移除旧的同名容器。
+
+```bash
+npm ci --prefix mujoco-dev/ros2/web
+npm run build --prefix mujoco-dev/ros2/web
+docker build -t route-plan-mujoco:jazzy mujoco-dev/ros2
+docker run -d --init --name route-plan-mujoco-ros2 \
+  -p 127.0.0.1:8765:8080 \
+  --mount "type=bind,source=$PWD/mujoco-dev,target=/workspace/mujoco-dev,readonly" \
+  route-plan-mujoco:jazzy ros2 launch /workspace/mujoco-dev/ros2/tracer.launch.py web:=true
+uv run --project mujoco-dev mjpython mujoco-dev/ros2/native_arena.py
+```
+
+打开 [本机控制页](http://127.0.0.1:8765/)。左侧将 MuJoCo 摄像机画面上传为 WebGL 纹理，右侧显示方向按钮和车身真值位姿。画面服务使用 8767 端口，只保留最新一帧，静止时复用纹理。长按按钮、↑ / ← / → 或 W / A / D 控制前进和左右原地转向。松开、切出页面或按 Esc 停车，指令中断时也会自动停车。
+
 [MuJoCo Python 查看器文档](https://mujoco.readthedocs.io/en/stable/python.html#interactive-viewer)
