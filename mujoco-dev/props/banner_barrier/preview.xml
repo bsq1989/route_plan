@@ -1,0 +1,18 @@
+<mujoco model="Visincept banner barrier preview">
+  <statistic center="0 0 0.44" extent="1.45"/>
+  <visual>
+    <global azimuth="106" elevation="-14" offwidth="1200" offheight="800"/>
+    <headlight ambient="0.31 0.31 0.31" diffuse="0.42 0.42 0.42" specular="0.22 0.22 0.22"/>
+  </visual>
+  <asset>
+    <model name="barrier" file="banner_barrier.xml"/>
+    <texture name="sky" type="skybox" builtin="gradient"
+             rgb1="0.58 0.66 0.75" rgb2="0.29 0.38 0.50" width="128" height="128"/>
+    <material name="ground" rgba="0.46 0.53 0.61 1" specular="0.06"/>
+  </asset>
+  <worldbody>
+    <light pos="-1 -1 2.8" dir="1 1 -2.8" diffuse="0.50 0.50 0.50"/>
+    <geom name="ground" type="plane" size="5 5 0.1" material="ground"/>
+    <attach model="barrier" body="banner_barrier" prefix="section_"/>
+  </worldbody>
+</mujoco>

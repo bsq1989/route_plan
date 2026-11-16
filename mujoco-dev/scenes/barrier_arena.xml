@@ -1,0 +1,50 @@
+<mujoco model="Visincept 3 by 2 barrier arena">
+  <compiler angle="radian"/>
+  <option integrator="implicitfast" timestep="0.002"/>
+  <statistic center="0 0 0.28" extent="4.65"/>
+  <visual>
+    <global azimuth="128" elevation="-39" offwidth="1440" offheight="960"/>
+    <headlight ambient="0.30 0.30 0.30" diffuse="0.52 0.52 0.52" specular="0.20 0.20 0.20"/>
+  </visual>
+  <asset>
+    <model name="tracer" file="../model/scene_tracer.xml"/>
+    <model name="barrier" file="../props/banner_barrier/banner_barrier.xml"/>
+    <texture name="sky" type="skybox" builtin="gradient"
+             rgb1="0.46 0.55 0.65" rgb2="0.27 0.33 0.42" width="128" height="128"/>
+    <texture name="floor_tiles" type="2d" builtin="checker"
+             rgb1="0.34 0.39 0.43" rgb2="0.40 0.45 0.49" width="256" height="256"/>
+    <material name="floor_tiles" texture="floor_tiles" texuniform="true" texrepeat="3 3" specular="0.06"/>
+  </asset>
+  <worldbody>
+    <light name="key" pos="1 -0.8 4.5" dir="-1 0.8 -4.5"
+           diffuse="0.65 0.65 0.65" specular="0.30 0.30 0.30"/>
+    <geom name="floor" type="plane" size="30 30 0.1" material="floor_tiles" contype="1" conaffinity="2"/>
+    <attach model="tracer" body="base_link" prefix=""/>
+
+    <!-- Long sides. Panel centres are one 1.48 m bay apart. -->
+    <frame pos="-1.48 -1.48 0"><attach model="barrier" body="banner_panel" prefix="south_west_"/></frame>
+    <frame pos="0 -1.48 0"><attach model="barrier" body="banner_panel" prefix="south_centre_"/></frame>
+    <frame pos="1.48 -1.48 0"><attach model="barrier" body="banner_panel" prefix="south_east_"/></frame>
+    <frame pos="-1.48 1.48 0"><attach model="barrier" body="banner_panel" prefix="north_west_"/></frame>
+    <frame pos="0 1.48 0"><attach model="barrier" body="banner_panel" prefix="north_centre_"/></frame>
+    <frame pos="1.48 1.48 0"><attach model="barrier" body="banner_panel" prefix="north_east_"/></frame>
+
+    <!-- Short sides. Rotate the panel's local X axis to align with world Y. -->
+    <frame pos="-2.22 -0.74 0" euler="0 0 1.570796326795"><attach model="barrier" body="banner_panel" prefix="west_south_"/></frame>
+    <frame pos="-2.22 0.74 0" euler="0 0 1.570796326795"><attach model="barrier" body="banner_panel" prefix="west_north_"/></frame>
+    <frame pos="2.22 -0.74 0" euler="0 0 1.570796326795"><attach model="barrier" body="banner_panel" prefix="east_south_"/></frame>
+    <frame pos="2.22 0.74 0" euler="0 0 1.570796326795"><attach model="barrier" body="banner_panel" prefix="east_north_"/></frame>
+
+    <!-- One post per join, including the four corners. -->
+    <frame pos="-2.22 -1.48 0"><attach model="barrier" body="left_stanchion" prefix="post_01_"/></frame>
+    <frame pos="-0.74 -1.48 0"><attach model="barrier" body="left_stanchion" prefix="post_02_"/></frame>
+    <frame pos="0.74 -1.48 0"><attach model="barrier" body="left_stanchion" prefix="post_03_"/></frame>
+    <frame pos="2.22 -1.48 0"><attach model="barrier" body="left_stanchion" prefix="post_04_"/></frame>
+    <frame pos="2.22 0 0"><attach model="barrier" body="left_stanchion" prefix="post_05_"/></frame>
+    <frame pos="2.22 1.48 0"><attach model="barrier" body="left_stanchion" prefix="post_06_"/></frame>
+    <frame pos="0.74 1.48 0"><attach model="barrier" body="left_stanchion" prefix="post_07_"/></frame>
+    <frame pos="-0.74 1.48 0"><attach model="barrier" body="left_stanchion" prefix="post_08_"/></frame>
+    <frame pos="-2.22 1.48 0"><attach model="barrier" body="left_stanchion" prefix="post_09_"/></frame>
+    <frame pos="-2.22 0 0"><attach model="barrier" body="left_stanchion" prefix="post_10_"/></frame>
+  </worldbody>
+</mujoco>

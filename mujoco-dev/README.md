@@ -47,4 +47,12 @@ uv run --project mujoco-dev python mujoco-dev/check_model.py
 
 无窗口检查覆盖静止、直行、停车、原地转向，以及底盘、六轴和夹爪同时运动。结果保存在 `output/check.json`。
 
+## 布面隔离围栏
+
+[围栏预览场景](props/banner_barrier/preview.xml)可直接在 MuJoCo 打开。[围栏模块](props/banner_barrier/banner_barrier.xml)包含固定的圆底座、立柱、横杆和带双面 Visincept 原图的布面。移动模块时把同目录的 `visincept_banner.png` 一起带走。
+
+柱中心距 1480 mm、总高 900 mm、圆底座直径 320 mm。按参考图估算，立柱直径 65 mm、下横杆中心离地 120 mm、杆下净空 110 mm。模型原点在两柱中间的地面上，沿局部 X 轴展开。可参考预览 XML 用 `asset/model` 和 `attach` 装入现有场景。每次拼接用独立的前缀，位置和转角可通过外层 `frame` 设置。
+
+[围栏试验场景](scenes/barrier_arena.xml)用 10 段护栏和 10 根共用立柱围成闭合矩形。长边 3 段、短边 2 段，按立柱中心线计为 4.44 × 2.96 m。官方 Tracer 2.0 裸底盘从场地中央起步。场景引用生成的 `model/scene_tracer.xml`，可直接用 MuJoCo 打开。
+
 [MuJoCo Python 查看器文档](https://mujoco.readthedocs.io/en/stable/python.html#interactive-viewer)
