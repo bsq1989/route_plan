@@ -70,7 +70,7 @@ else:
 
 ## 输入输出协议
 
-远近观测、两级方位缓存与 Gateway 异步反馈使用 `CoveragePolicy.next_action()` 和 `submit_result()`。接入契约见 [SDK 的 Gateway 远近拾取策略](../planner/sdk/README.md#gateway-远近拾取策略) 和 [最小异步示例](../planner/sdk/examples/gateway_coverage.py)。
+远近观测、两级方位缓存与 Gateway 异步反馈使用 `CoveragePolicy.next_action()` 和 `submit_result()`。 [Gateway 接入契约](../planner/sdk/README.md#gateway-远近拾取策略) · [最小异步示例](../planner/sdk/examples/gateway_coverage.py) · [v0.2.15 实车复盘日志清单](gateway-replay-v0.2.15.md)
 
 `PlanningRequest` 接受当前车身中心位姿、目标列表、场地边界、统一目标直径、方法与时限。矩形由 `width / height` 和可选的 `map_offset: [x, y]` 定义，默认左下角为 `(0, 0)`。可选的 `fence` 接收 map 下按顺时针或逆时针排列的有效围栏顶点 `[[x, y], ...]`，单位为米，支持凹多边形且自动闭合。传入后可以省略宽高，输出位姿仍在 map 下。车身安全轮廓与消除器不得在任何运动时刻接触围栏，目标圆也必须完整在围栏内。参见 [围栏示例](../planner/sdk/examples/fence.py)。
 
