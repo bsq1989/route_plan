@@ -51,8 +51,9 @@ def read_rings(document):
 
 class EliminationOverlay:
     def __init__(self, document):
+        self.rings = tuple(read_rings(document))
         regions = []
-        for rings in read_rings(document):
+        for rings in self.rings:
             points = np.concatenate(rings)
             ends = np.cumsum([len(ring) for ring in rings], dtype=np.uint32)
             indices = mapbox_earcut.triangulate_float64(points, ends).reshape(-1, 3)

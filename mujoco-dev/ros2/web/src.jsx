@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
-import {showFrames} from "./frame.js";
+import {frameOrigin, showFrames} from "./frame.js";
 import {loadEliminationOverlay} from "./overlay.js";
 import "./style.css";
 
@@ -102,6 +102,7 @@ function useDrive(online) {
   useEffect(() => {
     const timer = setInterval(send, 85);
     function keydown(event) {
+      if (event.target instanceof HTMLInputElement) return;
       if (event.code === "ArrowDown") {
         event.preventDefault();
         return;
@@ -186,11 +187,43 @@ function LoadEliminationOverlay() {
 
   useEffect(() => source ? loadEliminationOverlay(source, setFeedback) : undefined, [source]);
 
-  return <div className="overlay-control">
+  return <div className="setting-row">
     <input ref={input} type="file" accept=".json,application/json" onChange={selectSnapshot} hidden/>
     <button type="button" disabled={picking} onClick={chooseFile}>加载消除区</button>
     {feedback && <p role="status">{feedback}</p>}
   </div>;
+}
+
+function ScatterDiscs({online}) {
+  const [count, setCount] = useState("30");
+  const [loading, setLoading] = useState(false);
+  const [feedback, setFeedback] = useState("");
+
+  async function scatter(event) {
+    event.preventDefault();
+    setLoading(true);
+    setFeedback("");
+    try {
+      const response = await fetch(`${frameOrigin}/scatter`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({count: Number(count)}),
+        signal: AbortSignal.timeout(3000),
+      });
+      setFeedback(response.ok ? `已撒布 ${count} 片` : await response.text());
+    } catch {
+      setFeedback("暂时无法撒布，请检查仿真连接。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return <form className="setting-row" onSubmit={scatter}>
+    <label>圆片数量 <input type="number" min="1" max="100" step="1" required
+      value={count} onChange={event => setCount(event.target.value)}/></label>
+    <button type="submit" disabled={!online || loading}>随机撒布</button>
+    {feedback && <p role="status">{feedback}</p>}
+  </form>;
 }
 
 function App() {
@@ -319,6 +352,7 @@ function App() {
         <section className="scene-settings" aria-labelledby="settings-heading">
           <h3 id="settings-heading">场景配置</h3>
           <LoadEliminationOverlay/>
+          <ScatterDiscs online={online}/>
         </section>
         <Pose value={status.pose}/>
       </section>

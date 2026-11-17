@@ -12,7 +12,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import mujoco
 import numpy as np
+import yaml
 
+from disc_scatter import DiscScatter
 from elimination_overlay import EliminationOverlay
 
 
@@ -38,6 +40,8 @@ class Latest:
         self.viewer_at = -float("inf")
         self.camera_view = DEFAULT_VIEW
         self.elimination_overlay = None
+        self.scatter = None
+        self.discs = ()
 
     def exchange(self, exit_signal):
         connection = HTTPConnection("127.0.0.1", BRIDGE_PORT, timeout=0.15)
@@ -123,7 +127,7 @@ class FrameHandler(BaseHTTPRequestHandler):
             self.wfile.write(pixels)
 
     def do_OPTIONS(self):
-        if self.path != "/overlay" or self.headers.get("Origin") != WEB_ORIGIN:
+        if self.path not in ("/overlay", "/scatter") or self.headers.get("Origin") != WEB_ORIGIN:
             self.send_error(404)
             return
         self.send_response(204)
@@ -133,29 +137,45 @@ class FrameHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        if self.path != "/overlay" or self.headers.get("Origin") != WEB_ORIGIN:
+        if self.path not in ("/overlay", "/scatter") or self.headers.get("Origin") != WEB_ORIGIN:
             self.close_connection = True
             self.send_error(404)
             return
         try:
             size = int(self.headers.get("Content-Length", "0"))
             if not 0 < size <= MAX_OVERLAY_BYTES:
-                raise ValueError("请选择 1 MB 以内的消除区 JSON 文件。")
+                raise ValueError("请发送 1 MB 以内的 JSON 数据。")
             document = json.loads(self.rfile.read(size))
-            overlay = EliminationOverlay(document)
+            if self.path == "/overlay":
+                overlay = EliminationOverlay(document)
+                with self.server.latest.lock:
+                    self.server.latest.elimination_overlay = overlay
+            else:
+                self.scatter_discs(document)
         except (UnicodeError, json.JSONDecodeError):
-            self.reply_overlay(400, "文件无法解析为 JSON。")
+            self.reply_text(400, "文件无法解析为 JSON。")
             return
         except (ValueError, OverflowError, OSError) as exc:
             self.close_connection = True
-            self.reply_overlay(400, str(exc))
+            self.reply_text(400, str(exc))
             return
 
-        with self.server.latest.lock:
-            self.server.latest.elimination_overlay = overlay
-        self.reply_overlay(200)
+        self.reply_text(200)
 
-    def reply_overlay(self, status, message=""):
+    def scatter_discs(self, document):
+        latest = self.server.latest
+        with latest.lock:
+            scatter, pose, overlay = latest.scatter, latest.state, latest.elimination_overlay
+        if scatter is None:
+            raise ValueError("正在等待场景初始化。")
+        count = document.get("count") if isinstance(document, dict) else None
+        discs = scatter.place(count, pose, overlay, np.random.default_rng())
+        with latest.lock:
+            if overlay is not latest.elimination_overlay:
+                raise ValueError("消除区刚刚更新，请重新撒布。")
+            latest.discs = discs
+
+    def reply_text(self, status, message=""):
         body = message.encode()
         self.send_response(status)
         self.send_header("Access-Control-Allow-Origin", WEB_ORIGIN)
@@ -182,6 +202,14 @@ def run_simulation(latest, exit_signal):
     interval = ticks_per_step * model.opt.timestep
     body_velocity = np.empty(6)
     mujoco.mj_forward(model, data)
+    config_path = ROOT.parent / "sim" / "config" / "robot.yaml"
+    robot = yaml.safe_load(config_path.read_text())
+    scatter = DiscScatter(model, data, robot)
+    default_overlay = EliminationOverlay({"rings": [{"points_m": robot["collector"]["polygon"]}]})
+    with latest.lock:
+        if latest.elimination_overlay is None:
+            latest.elimination_overlay = default_overlay
+        latest.scatter = scatter
 
     camera = mujoco.MjvCamera()
     mujoco.mjv_defaultFreeCamera(model, camera)
@@ -198,6 +226,7 @@ def run_simulation(latest, exit_signal):
         last_rendered = None
         rendered_view = None
         rendered_overlay = None
+        rendered_discs = None
         frame_due = 0.0
         deadline = monotonic()
 
@@ -209,6 +238,7 @@ def run_simulation(latest, exit_signal):
                 has_viewer = now - latest.viewer_at < 1.0
                 view = latest.camera_view
                 overlay = latest.elimination_overlay
+                discs = latest.discs
             data.ctrl[actuators] = wheels
             mujoco.mj_step(model, data, nstep=ticks_per_step)
             base_pose = data.qpos[base_start:base_start + 7]
@@ -228,7 +258,7 @@ def run_simulation(latest, exit_signal):
             if has_viewer and now >= frame_due:
                 visible_state = np.concatenate((base_pose, angles))
                 moved = last_rendered is None or np.max(np.abs(last_rendered - visible_state)) >= 0.0007
-                if moved or view != rendered_view or overlay is not rendered_overlay:
+                if moved or view != rendered_view or overlay is not rendered_overlay or discs is not rendered_discs:
                     set_camera_view(camera, view)
                     renderer.update_scene(data, camera=camera)
                     if overlay is not None:
@@ -236,6 +266,8 @@ def run_simulation(latest, exit_signal):
                         x, y = data.xpos[base_body, :2]
                         orientation = data.xmat[base_body]
                         overlay.draw(renderer.scene, x, y, atan2(orientation[3], orientation[0]))
+                    if discs:
+                        scatter.draw(renderer.scene, discs)
                     pixels = renderer.render().tobytes()
                     with latest.lock:
                         latest.frame = pixels
@@ -243,6 +275,7 @@ def run_simulation(latest, exit_signal):
                     last_rendered = visible_state
                     rendered_view = view
                     rendered_overlay = overlay
+                    rendered_discs = discs
                     frame_due = now + 1 / 20
 
             deadline += interval
