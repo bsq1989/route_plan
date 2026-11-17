@@ -70,6 +70,35 @@ wheels = [
 ]
 
 [[package]]
+name = "mapbox-earcut"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/aa/14/8505f246191c41da54a64a4d6c30049ed47b6047930d8f0de328dadb06ee/mapbox_earcut-2.1.0.tar.gz", hash = "sha256:fb0c1e43581a635bbaabf4a5149009014d370c515816c4d5a7d8118477f28d48", size = 46744, upload-time = "2026-09-08T19:01:06.749Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2c/d0/74534b0a7df17340cb2ab2c959909ec7005eaaf8422da646565205b04664/mapbox_earcut-2.1.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:ba3e72cbe58c564acc4e07458da0da0cbf3e034705a093cdf6213815793cf566", size = 69401, upload-time = "2026-09-08T18:59:41.448Z" },
+    { url = "https://files.pythonhosted.org/packages/67/3e/d93e98c76afad5075151d6e19a8446092a53fd42823f4734138dbc74fd5b/mapbox_earcut-2.1.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:4e392807f3e25f268826ece0f32739f0410ac46eebf70f06e701950297292d7c", size = 66308, upload-time = "2026-09-08T18:59:42.656Z" },
+    { url = "https://files.pythonhosted.org/packages/52/4f/b886e77d14f9807abccb2eb0e4752400746fa16cc6a2c9197e88385332ca/mapbox_earcut-2.1.0-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3f6181c097afb5de2a7160424cdb0660510bf8689ed4585a3f61f3f52596c18b", size = 73034, upload-time = "2026-09-08T18:59:43.941Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/d0/9557f5d60e21c434cf87d70fe056899eb6b7ee8cf7755c556e06c77c8dab/mapbox_earcut-2.1.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5592b56bf6ba66c1d360edf019c7708c8ec9ab6b71b336e457f4660a077676ed", size = 76846, upload-time = "2026-09-08T18:59:45.248Z" },
+    { url = "https://files.pythonhosted.org/packages/29/71/6ea9a0bf249782684b241c58a7fdf58c07aa760233a5c0d4366d10f2c25e/mapbox_earcut-2.1.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:c0875192aed99a58e438abbcd5c096517c7947002a5f442440e2a7673f20cc0d", size = 168787, upload-time = "2026-09-08T18:59:46.708Z" },
+    { url = "https://files.pythonhosted.org/packages/be/d5/8cbe09f35d6dedccfc90d7823bbdf7782e0665134dd5abd53d18e2ad1bc7/mapbox_earcut-2.1.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:ace5e2f5f53d742fffdb795c66e8387b0cca04ecf11588fbb8ab14150f30f214", size = 174324, upload-time = "2026-09-08T18:59:48.087Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/c1/7c9453cb4e0cf19184da13324d96f349e5a180dc78da12dda886dce894a6/mapbox_earcut-2.1.0-cp312-cp312-win32.whl", hash = "sha256:c87bf3755011fde95713c5b655c67b144e23e218e65efed2b7ec44f0188b3af9", size = 272880, upload-time = "2026-09-08T18:59:49.478Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/58/b1021f9065d315a5d325a913cc76c996a1629fb032df9c3fa5c9939bf692/mapbox_earcut-2.1.0-cp312-cp312-win_amd64.whl", hash = "sha256:eeea00eeb70873d840290e98471671d02e4ac0536b847b785177a14001e33a95", size = 279405, upload-time = "2026-09-08T18:59:50.936Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/95/f9b0ecb85c62768b2827ab50fcda3228e5f133c0e11aa9dc4759c6f4c1dd/mapbox_earcut-2.1.0-cp312-cp312-win_arm64.whl", hash = "sha256:d48c8abdf0268903689335f4b609022b588b84d98a455c2a2cb0d6bacd5bad50", size = 448075, upload-time = "2026-09-08T18:59:52.76Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/8d/9225758660ddf74fa757a044efdd40bc3e9ad509bc012c0efd58082012dc/mapbox_earcut-2.1.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:fe652ace9a050b9f6447e9d7a9f2465fab951547e295ba1de7f2404f8bdf326f", size = 69339, upload-time = "2026-09-08T18:59:54.207Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/c7/34fc86374e487adeae197f42883664abe72c48663e9d106b6b431645d053/mapbox_earcut-2.1.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:01e1df4c841ebdccce44e07046e6d23f307019957f69751439da744f7b09a262", size = 66326, upload-time = "2026-09-08T18:59:55.603Z" },
+    { url = "https://files.pythonhosted.org/packages/38/24/edf60cbcdf8327e18279dce6963496542dfefbf3c49641a8a68e753b9a6d/mapbox_earcut-2.1.0-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:611a6fc362c6a24cd7fc230e2740300e60bc5360e6085e36b40c5776eaf156a5", size = 72924, upload-time = "2026-09-08T18:59:56.854Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/a1/841d702350b644808fc9c4793910045a9fb63a387aabe132de225d0a07cc/mapbox_earcut-2.1.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7cee9422275dd8700bb04f82eac3410d03c283630a1cc536b1a09cc721a5c0a1", size = 76712, upload-time = "2026-09-08T18:59:58.146Z" },
+    { url = "https://files.pythonhosted.org/packages/47/ca/349241fb7971173f2bb7f626396b2d504c7ed3fc1f46f19c18769865fc94/mapbox_earcut-2.1.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:d2d87ecc9a00faafb7a0e6c0179bc61e54f79c23f44c33269605475d5eeceb07", size = 168702, upload-time = "2026-09-08T18:59:59.439Z" },
+    { url = "https://files.pythonhosted.org/packages/38/45/1a43da1002787a1b4dcc3740d0216d60239cf92a878ac6cc1ca8d2d4d089/mapbox_earcut-2.1.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:086cf89caf061da1669add4f92aa76e5e90a232edc7f82445df362334fd4c3f8", size = 174200, upload-time = "2026-09-08T19:00:01.047Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/65/c97fabf109c2e381611e20a9657a4097d90dcbd82abb2e183e0247a81a8f/mapbox_earcut-2.1.0-cp313-cp313-win32.whl", hash = "sha256:fed97aaa1cd846c1a24867a43fe0a6603e84b25543cec9f58aced65a8c5c723f", size = 272923, upload-time = "2026-09-08T19:00:02.618Z" },
+    { url = "https://files.pythonhosted.org/packages/60/e1/dc52f1b18347c29742ff1a82c0f88553c8fac71fdc541cabe553ddead1c4/mapbox_earcut-2.1.0-cp313-cp313-win_amd64.whl", hash = "sha256:0224b889f67b2868b4cf4dc3ba7dd7006122ece2199159147edce80e05df079c", size = 279382, upload-time = "2026-09-08T19:00:04.145Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/45/cc48844e03f595b535facd5f5b481db05f98e017b3858fab96c639b5da50/mapbox_earcut-2.1.0-cp313-cp313-win_arm64.whl", hash = "sha256:7b3441c188704bd03ca7c320c444378eda529ef494220b9b735389b87765a38e", size = 448060, upload-time = "2026-09-08T19:00:05.728Z" },
+]
+
+[[package]]
 name = "mujoco"
 version = "3.10.0"
 source = { registry = "https://pypi.org/simple" }
@@ -167,6 +196,7 @@ name = "tracer-piper-mujoco"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "mapbox-earcut" },
     { name = "mujoco" },
     { name = "numpy" },
 ]
@@ -180,6 +210,7 @@ build = [
 
 [package.metadata]
 requires-dist = [
+    { name = "mapbox-earcut", specifier = ">=2,<3" },
     { name = "mujoco", specifier = "==3.10.0" },
     { name = "numpy", specifier = ">=2" },
 ]

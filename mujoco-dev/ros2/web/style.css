@@ -64,13 +64,8 @@ h1 { font-size: clamp(26px, 2.6vw, 40px); line-height: 1.12; letter-spacing: -.0
 h2 { font-size: clamp(21px, 2.15vw, 32px); line-height: 1.2; }
 .scene { display: flex; flex-direction: column; min-height: 0; padding: 8px; }
 .scene-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   padding: clamp(6px, 1.2dvh, 12px) 17px clamp(7px, 2.1dvh, 22px);
 }
-.scene-header span { color: var(--muted); font-size: clamp(13px, 1.35vw, 20px); }
 .camera {
   display: grid;
   place-items: center;
@@ -88,30 +83,31 @@ h2 { font-size: clamp(21px, 2.15vw, 32px); line-height: 1.2; }
 .camera p { position: relative; padding: 10px 16px; border-radius: 8px; background: #0c111bea; color: var(--muted); }
 
 .controls { padding: clamp(10px, 2dvh, 20px) clamp(15px, 1.9vw, 29px); }
-.instructions { color: var(--muted); margin-top: clamp(4px, 1.2dvh, 12px); font-size: clamp(14px, 1.35vw, 21px); }
+.instructions { color: var(--muted); margin-top: 6px; font-size: 14px; }
 .drive-pad {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(6px, 1.1dvh, 11px);
-  margin: clamp(8px, 3.4dvh, 36px) auto 0;
-  width: min(100%, clamp(126px, calc(100dvh - 300px), 390px));
+  gap: 6px;
+  margin-top: 12px;
+  width: min(100%, 204px);
   touch-action: none;
 }
 .drive-pad button {
   appearance: none;
-  aspect-ratio: 1;
+  min-height: 46px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 2px;
   color: var(--text);
   background: #202a3d;
   border: 1px solid #3b465a;
-  border-radius: 15px;
-  padding: 0;
+  border-radius: 8px;
+  padding: 4px 2px;
   font: inherit;
-  font-size: clamp(14px, 1.52vw, 23px);
+  font-size: 13px;
+  line-height: 1.2;
   cursor: pointer;
   touch-action: none;
   user-select: none;
@@ -119,11 +115,11 @@ h2 { font-size: clamp(21px, 2.15vw, 32px); line-height: 1.2; }
 }
 .drive-pad button:disabled { opacity: .48; cursor: default; }
 .drive-pad button:not(:disabled):hover { border-color: #8584b5; }
-.drive-pad button:focus-visible { outline: 2px solid #b8b1ff; outline-offset: 3px; }
+.controls button:focus-visible { outline: 2px solid #b8b1ff; outline-offset: 3px; }
 .drive-pad button[data-active="true"] { background: #6256db; border-color: #a49aff; }
 .drive-pad svg {
-  width: clamp(25px, 3.2vw, 46px);
-  height: clamp(25px, 3.2vw, 46px);
+  width: 18px;
+  height: 18px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2.15;
@@ -135,13 +131,31 @@ h2 { font-size: clamp(21px, 2.15vw, 32px); line-height: 1.2; }
 .drive-pad [data-command="stop"] { grid-area: 2 / 2; background: #323c4e; }
 .drive-pad [data-command="right"] { grid-area: 2 / 3; }
 .keyboard {
-  margin-top: clamp(7px, 3dvh, 32px);
-  text-align: center;
+  margin-top: 8px;
   color: var(--muted);
-  font-size: clamp(13px, 1.3vw, 20px);
+  font-size: 13px;
 }
-.pose { margin-top: clamp(8px, 3dvh, 32px); padding-top: clamp(6px, 2.2dvh, 23px); border-top: 1px solid #49566c; }
-.pose h3 { font-size: clamp(18px, 1.8vw, 27px); }
+.scene-settings, .pose {
+  margin-top: clamp(12px, 2dvh, 20px);
+  padding-top: clamp(10px, 1.5dvh, 15px);
+  border-top: 1px solid #49566c;
+}
+.controls h3 { font-size: clamp(17px, 1.5vw, 22px); }
+.overlay-control { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; margin-top: 8px; }
+.overlay-control button {
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #202a3d;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.overlay-control button:hover { border-color: #8584b5; }
+.overlay-control button:disabled { opacity: .6; cursor: default; }
+.overlay-control p { color: var(--muted); font-size: 12px; }
 .pose dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: clamp(5px, 2dvh, 21px); }
 .pose dt { font-size: clamp(13px, 1.3vw, 19px); color: var(--muted); }
 .pose dd {
@@ -154,9 +168,6 @@ h2 { font-size: clamp(21px, 2.15vw, 32px); line-height: 1.2; }
 
 @media (max-height: 600px) {
   h2 { font-size: clamp(19px, 4dvh, 24px); }
-  .drive-pad button { gap: 2px; font-size: 14px; border-radius: 10px; }
-  .drive-pad svg { width: clamp(17px, 4.3dvh, 25px); height: clamp(17px, 4.3dvh, 25px); }
-  .pose h3 { font-size: 18px; }
   .pose dd { margin-top: 2px; font-size: 16px; }
 }
 
@@ -178,13 +189,12 @@ h2 { font-size: clamp(21px, 2.15vw, 32px); line-height: 1.2; }
     grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
     column-gap: 12px;
   }
-  .controls h2, .instructions { grid-column: 1 / -1; }
-  .drive-pad { grid-column: 1; width: min(100%, clamp(112px, 24dvh, 216px)); }
-  .keyboard { grid-column: 1; margin-top: 8px; }
+  .controls h2, .instructions, .scene-settings { grid-column: 1 / -1; }
+  .drive-pad, .keyboard { grid-column: 1; }
   .pose {
     grid-column: 2;
     grid-row: 3 / 5;
-    margin-top: clamp(8px, 3.4dvh, 36px);
+    margin-top: 12px;
     padding: 0 0 0 12px;
     border-top: 0;
     border-left: 1px solid #49566c;

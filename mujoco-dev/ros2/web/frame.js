@@ -1,3 +1,5 @@
+export const frameOrigin = `${window.location.protocol}//${window.location.hostname}:8767`;
+
 // Only the newest available native framebuffer is transferred and uploaded.
 export function showFrames(canvas, report, readView) {
   const gl = canvas.getContext("webgl2", {alpha: false, depth: false, antialias: false});
@@ -52,7 +54,6 @@ export function showFrames(canvas, report, readView) {
   let sequence = "";
   let sentView;
   let allocated = false;
-  const origin = `${window.location.protocol}//${window.location.hostname}:8767`;
 
   async function next() {
     if (!document.hidden && !gl.isContextLost()) {
@@ -62,7 +63,7 @@ export function showFrames(canvas, report, readView) {
         const view = readView();
         const query = new URLSearchParams({after: sequence});
         if (view !== sentView) query.set("view", view);
-        const response = await fetch(`${origin}/frame?${query}`, {signal: request.signal});
+        const response = await fetch(`${frameOrigin}/frame?${query}`, {signal: request.signal});
         if (!response.ok) throw new Error("Frame service unavailable");
         sentView = view;
         if (response.status === 200) {

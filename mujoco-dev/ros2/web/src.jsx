@@ -1,6 +1,7 @@
 import React, {useEffect, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 import {showFrames} from "./frame.js";
+import {loadEliminationOverlay} from "./overlay.js";
 import "./style.css";
 
 const directions = {
@@ -106,6 +107,7 @@ function useDrive(online) {
         return;
       }
       if (event.metaKey || event.altKey || event.ctrlKey) return;
+      if (event.code === "Space" && event.target instanceof HTMLButtonElement && !event.target.dataset.command) return;
       const command = directions[event.code] ||
         (["Enter", "Space"].includes(event.code) && event.target.dataset?.command);
       if (event.code === "Escape" || (event.code === "Space" && !command)) {
@@ -150,6 +152,45 @@ function Pose({value}) {
       </div>
     )}</dl>
   </section>;
+}
+
+function LoadEliminationOverlay() {
+  const input = useRef(null);
+  const [source, setSource] = useState(null);
+  const [picking, setPicking] = useState(false);
+  const [feedback, setFeedback] = useState("");
+
+  async function chooseFile() {
+    if (typeof window.showOpenFilePicker !== "function") {
+      input.current.click();
+      return;
+    }
+    setPicking(true);
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{description: "消除区 JSON", accept: {"application/json": [".json"]}}],
+      });
+      if (handle) setSource({handle});
+    } catch (error) {
+      if (error.name !== "AbortError") input.current.click();
+    } finally {
+      setPicking(false);
+    }
+  }
+
+  function selectSnapshot(event) {
+    const file = event.target.files[0];
+    event.target.value = "";
+    if (file) setSource({file});
+  }
+
+  useEffect(() => source ? loadEliminationOverlay(source, setFeedback) : undefined, [source]);
+
+  return <div className="overlay-control">
+    <input ref={input} type="file" accept=".json,application/json" onChange={selectSnapshot} hidden/>
+    <button type="button" disabled={picking} onClick={chooseFile}>加载消除区</button>
+    {feedback && <p role="status">{feedback}</p>}
+  </div>;
 }
 
 function App() {
@@ -244,7 +285,7 @@ function App() {
 
     <main className="workspace">
       <section className="panel scene" aria-labelledby="scene-heading">
-        <div className="scene-header"><h2 id="scene-heading">试验场景</h2><span>实时画面</span></div>
+        <div className="scene-header"><h2 id="scene-heading">试验场景</h2></div>
         <div className="camera" title="拖动旋转，Shift + 拖动平移，滚轮缩放，双击恢复俯视">
           <canvas ref={camera} role="img" aria-label="MuJoCo 围栏试验场画面"/>
           {frameMessage && <p>{frameMessage}</p>}
@@ -275,6 +316,10 @@ function App() {
           )}
         </div>
         <p className="keyboard">↑ / ← / → 或 W / A / D</p>
+        <section className="scene-settings" aria-labelledby="settings-heading">
+          <h3 id="settings-heading">场景配置</h3>
+          <LoadEliminationOverlay/>
+        </section>
         <Pose value={status.pose}/>
       </section>
     </main>

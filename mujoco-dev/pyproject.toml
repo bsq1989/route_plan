@@ -2,7 +2,11 @@
 name = "tracer-piper-mujoco"
 version = "0.1.0"
 requires-python = ">=3.12,<3.14"
-dependencies = ["mujoco==3.10.0", "numpy>=2"]
+dependencies = [
+    "mapbox-earcut>=2,<3",
+    "mujoco==3.10.0",
+    "numpy>=2",
+]
 
 [dependency-groups]
 build = ["usd-core==26.11", "fast-simplification>=0.1.13,<0.2", "pillow>=11,<13"]

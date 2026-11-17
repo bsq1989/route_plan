@@ -4,7 +4,7 @@ import ctypes
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-from math import isfinite
+from math import atan2, isfinite
 from pathlib import Path
 from threading import Event, Lock, Thread
 from time import monotonic
@@ -13,12 +13,16 @@ from urllib.parse import parse_qs, urlsplit
 import mujoco
 import numpy as np
 
+from elimination_overlay import EliminationOverlay
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WIDTH, HEIGHT = 1000, 700
 WHEELS = ("left_wheel_joint", "right_wheel_joint")
 BRIDGE_PORT = 8765
 FRAME_PORT = 8767
+WEB_ORIGIN = f"http://127.0.0.1:{BRIDGE_PORT}"
+MAX_OVERLAY_BYTES = 1024 * 1024
 SIM_TIMEOUT = 0.25
 DEFAULT_VIEW = (90.0, -90.0, 1.0, 0.0, 0.0)
 
@@ -33,6 +37,7 @@ class Latest:
         self.frame_id = 0
         self.viewer_at = -float("inf")
         self.camera_view = DEFAULT_VIEW
+        self.elimination_overlay = None
 
     def exchange(self, exit_signal):
         connection = HTTPConnection("127.0.0.1", BRIDGE_PORT, timeout=0.15)
@@ -87,7 +92,7 @@ class FrameHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlsplit(self.path)
         latest = self.server.latest
-        if url.path != "/frame" or self.headers.get("Origin") != f"http://127.0.0.1:{BRIDGE_PORT}":
+        if url.path != "/frame" or self.headers.get("Origin") != WEB_ORIGIN:
             self.send_error(404)
             return
         query = parse_qs(url.query)
@@ -105,7 +110,7 @@ class FrameHandler(BaseHTTPRequestHandler):
             pixels = latest.frame if sequence != after else b""
 
         self.send_response(200 if pixels else 204)
-        self.send_header("Access-Control-Allow-Origin", f"http://127.0.0.1:{BRIDGE_PORT}")
+        self.send_header("Access-Control-Allow-Origin", WEB_ORIGIN)
         self.send_header("Access-Control-Expose-Headers", "X-Frame, X-Width, X-Height")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Type", "application/octet-stream")
@@ -116,6 +121,48 @@ class FrameHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if pixels:
             self.wfile.write(pixels)
+
+    def do_OPTIONS(self):
+        if self.path != "/overlay" or self.headers.get("Origin") != WEB_ORIGIN:
+            self.send_error(404)
+            return
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", WEB_ORIGIN)
+        self.send_header("Access-Control-Allow-Methods", "POST")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def do_POST(self):
+        if self.path != "/overlay" or self.headers.get("Origin") != WEB_ORIGIN:
+            self.close_connection = True
+            self.send_error(404)
+            return
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if not 0 < size <= MAX_OVERLAY_BYTES:
+                raise ValueError("请选择 1 MB 以内的消除区 JSON 文件。")
+            document = json.loads(self.rfile.read(size))
+            overlay = EliminationOverlay(document)
+        except (UnicodeError, json.JSONDecodeError):
+            self.reply_overlay(400, "文件无法解析为 JSON。")
+            return
+        except (ValueError, OverflowError, OSError) as exc:
+            self.close_connection = True
+            self.reply_overlay(400, str(exc))
+            return
+
+        with self.server.latest.lock:
+            self.server.latest.elimination_overlay = overlay
+        self.reply_overlay(200)
+
+    def reply_overlay(self, status, message=""):
+        body = message.encode()
+        self.send_response(status)
+        self.send_header("Access-Control-Allow-Origin", WEB_ORIGIN)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_request(self, code="-", size="-"):
         pass
@@ -150,6 +197,7 @@ def run_simulation(latest, exit_signal):
         print(f"Live frame service listening on 127.0.0.1:{FRAME_PORT}", flush=True)
         last_rendered = None
         rendered_view = None
+        rendered_overlay = None
         frame_due = 0.0
         deadline = monotonic()
 
@@ -160,6 +208,7 @@ def run_simulation(latest, exit_signal):
                 wheels = latest.wheels if connected else (0.0, 0.0)
                 has_viewer = now - latest.viewer_at < 1.0
                 view = latest.camera_view
+                overlay = latest.elimination_overlay
             data.ctrl[actuators] = wheels
             mujoco.mj_step(model, data, nstep=ticks_per_step)
             base_pose = data.qpos[base_start:base_start + 7]
@@ -178,15 +227,22 @@ def run_simulation(latest, exit_signal):
 
             if has_viewer and now >= frame_due:
                 visible_state = np.concatenate((base_pose, angles))
-                if view != rendered_view or last_rendered is None or np.max(np.abs(last_rendered - visible_state)) >= 0.0007:
+                moved = last_rendered is None or np.max(np.abs(last_rendered - visible_state)) >= 0.0007
+                if moved or view != rendered_view or overlay is not rendered_overlay:
                     set_camera_view(camera, view)
                     renderer.update_scene(data, camera=camera)
+                    if overlay is not None:
+                        # Use the same world pose as the frame. Roll and pitch stay out of the overlay.
+                        x, y = data.xpos[base_body, :2]
+                        orientation = data.xmat[base_body]
+                        overlay.draw(renderer.scene, x, y, atan2(orientation[3], orientation[0]))
                     pixels = renderer.render().tobytes()
                     with latest.lock:
                         latest.frame = pixels
                         latest.frame_id += 1
                     last_rendered = visible_state
                     rendered_view = view
+                    rendered_overlay = overlay
                     frame_due = now + 1 / 20
 
             deadline += interval
