@@ -80,19 +80,16 @@ docker exec route-plan-mujoco-ros2 /ros_entrypoint.sh \
 
 网页模式下，MuJoCo 的物理和 OpenGL 渲染由 Mac 上的原生进程运行。Docker 运行 ROS 2、差速控制器和网页服务，通过 ROS 关节话题桥接左右轮速度指令与反馈。本地两个服务都绑定到回环地址。
 
-从仓库根目录构建前端和容器镜像。切换模式时，先停止并移除旧的同名容器。
+在 Mac 上启动 Docker Desktop，准备 npm、uv 和上文的模型，然后从仓库根目录执行一键启动命令。
 
 ```bash
-npm ci --prefix mujoco-dev/ros2/web
-npm run build --prefix mujoco-dev/ros2/web
-docker build -t route-plan-mujoco:jazzy mujoco-dev/ros2
-docker run -d --init --name route-plan-mujoco-ros2 \
-  -p 127.0.0.1:8765:8080 \
-  --mount "type=bind,source=$PWD/mujoco-dev,target=/workspace/mujoco-dev,readonly" \
-  route-plan-mujoco:jazzy ros2 launch /workspace/mujoco-dev/ros2/tracer.launch.py web:=true
-uv run --project mujoco-dev mjpython mujoco-dev/ros2/native_arena.py
+./mujoco-dev/ros2/start_web.sh
 ```
 
-打开 [本机控制页](http://127.0.0.1:8765/)。左侧将 MuJoCo 摄像机画面上传为 WebGL 纹理，右侧显示方向按钮和车身真值位姿。画面服务使用 8767 端口，只保留最新一帧，静止时复用纹理。长按按钮、↑ / ← / → 或 W / A / D 控制前进和左右原地转向。松开、切出页面或按 Esc 停车，指令中断时也会自动停车。
+脚本准备前端和 Python 环境，启动 ROS 2 容器和 macOS 后台 MuJoCo，并等待两个服务就绪。同一份网页仿真正在运行时，重复执行会复用进程和当前车位。若要从常规容器模式切换，先停止并移除旧的同名容器。
+
+打开 [本机控制页](http://127.0.0.1:8765/)。左侧将 MuJoCo 摄像机画面上传为 WebGL 纹理，右侧显示方向按钮和车身真值位姿。画面服务使用 8767 端口，只保留最新一帧，车和相机静止时复用纹理。
+
+场景默认从正上方俯视。拖动旋转相机，按住 Shift 拖动或用右键拖动平移，滚轮或触控板捏合可在 1× 到 2.5× 之间缩放，双击恢复默认俯视。长按方向按钮、↑ / ← / → 或 W / A / D 控制前进和左右原地转向。松开、切出页面或按 Esc 停车，指令中断时也会自动停车。
 
 [MuJoCo Python 查看器文档](https://mujoco.readthedocs.io/en/stable/python.html#interactive-viewer)

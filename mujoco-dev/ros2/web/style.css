@@ -13,31 +13,39 @@
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; padding: 0 24px 36px; }
+body { margin: 0; }
 h1, h2, h3, p, dl, dd { margin: 0; }
 
+#app {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 360px;
+  padding: 0 clamp(12px, 1.6vw, 24px) clamp(10px, 2.4dvh, 24px);
+}
+
 .masthead {
-  min-height: 111px;
+  min-height: clamp(58px, 10.8dvh, 111px);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 13px;
+  padding: clamp(8px, 1.55dvh, 16px) 13px;
   border-bottom: 1px solid #52637f;
 }
 
-.brand { display: flex; align-items: center; gap: 22px; }
+.brand { display: flex; align-items: center; gap: clamp(10px, 2.15dvh, 22px); }
 .brand-icon {
   display: grid;
   place-items: center;
-  width: 84px;
-  height: 75px;
+  width: clamp(45px, 8.2dvh, 84px);
+  height: clamp(42px, 7.3dvh, 75px);
   flex: none;
   border: 1px solid #554cbf;
   border-radius: 16px;
   background: #3d36a4;
 }
-.brand-icon svg { width: 48px; height: 48px; }
+.brand-icon svg { width: 64%; height: 64%; }
 h1 { font-size: clamp(26px, 2.6vw, 40px); line-height: 1.12; letter-spacing: -.03em; }
 .brand p { margin-top: 4px; font-size: clamp(14px, 1.5vw, 23px); color: var(--muted); }
 .connection { display: flex; align-items: center; gap: 12px; font-size: clamp(13px, 1.4vw, 21px); }
@@ -49,17 +57,18 @@ h1 { font-size: clamp(26px, 2.6vw, 40px); line-height: 1.12; letter-spacing: -.0
   display: grid;
   grid-template-columns: minmax(0, 2.32fr) minmax(272px, 1fr);
   gap: 22px;
-  padding-top: 32px;
+  min-height: 0;
+  padding-top: clamp(10px, 3.1dvh, 32px);
 }
 .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; min-width: 0; }
 h2 { font-size: clamp(21px, 2.15vw, 32px); line-height: 1.2; }
-.scene { display: flex; flex-direction: column; padding: 8px; }
+.scene { display: flex; flex-direction: column; min-height: 0; padding: 8px; }
 .scene-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 17px 22px;
+  padding: clamp(6px, 1.2dvh, 12px) 17px clamp(7px, 2.1dvh, 22px);
 }
 .scene-header span { color: var(--muted); font-size: clamp(13px, 1.35vw, 20px); }
 .camera {
@@ -67,23 +76,25 @@ h2 { font-size: clamp(21px, 2.15vw, 32px); line-height: 1.2; }
   place-items: center;
   flex: 1;
   min-height: 0;
-  aspect-ratio: 4 / 3;
   background: #1b2533;
   border-radius: 9px;
   overflow: hidden;
   position: relative;
+  cursor: grab;
+  touch-action: none;
 }
-.camera canvas { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; }
+.camera[data-dragging="true"] { cursor: grabbing; }
+.camera canvas { width: 100%; height: 100%; object-fit: contain; position: absolute; inset: 0; }
 .camera p { position: relative; padding: 10px 16px; border-radius: 8px; background: #0c111bea; color: var(--muted); }
 
-.controls { padding: 20px clamp(19px, 1.9vw, 29px) 30px; }
-.instructions { color: var(--muted); margin-top: 12px; font-size: clamp(14px, 1.35vw, 21px); }
+.controls { padding: clamp(10px, 2dvh, 20px) clamp(15px, 1.9vw, 29px); }
+.instructions { color: var(--muted); margin-top: clamp(4px, 1.2dvh, 12px); font-size: clamp(14px, 1.35vw, 21px); }
 .drive-pad {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 11px;
-  margin: clamp(20px, 2.3vw, 36px) auto 0;
-  max-width: 390px;
+  gap: clamp(6px, 1.1dvh, 11px);
+  margin: clamp(8px, 3.4dvh, 36px) auto 0;
+  width: min(100%, clamp(126px, calc(100dvh - 300px), 390px));
   touch-action: none;
 }
 .drive-pad button {
@@ -124,14 +135,14 @@ h2 { font-size: clamp(21px, 2.15vw, 32px); line-height: 1.2; }
 .drive-pad [data-command="stop"] { grid-area: 2 / 2; background: #323c4e; }
 .drive-pad [data-command="right"] { grid-area: 2 / 3; }
 .keyboard {
-  margin-top: clamp(18px, 2vw, 32px);
+  margin-top: clamp(7px, 3dvh, 32px);
   text-align: center;
   color: var(--muted);
   font-size: clamp(13px, 1.3vw, 20px);
 }
-.pose { margin-top: clamp(20px, 2vw, 32px); padding-top: clamp(17px, 1.5vw, 23px); border-top: 1px solid #49566c; }
+.pose { margin-top: clamp(8px, 3dvh, 32px); padding-top: clamp(6px, 2.2dvh, 23px); border-top: 1px solid #49566c; }
 .pose h3 { font-size: clamp(18px, 1.8vw, 27px); }
-.pose dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 21px; }
+.pose dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: clamp(5px, 2dvh, 21px); }
 .pose dt { font-size: clamp(13px, 1.3vw, 19px); color: var(--muted); }
 .pose dd {
   margin-top: 5px;
@@ -141,17 +152,44 @@ h2 { font-size: clamp(21px, 2.15vw, 32px); line-height: 1.2; }
   white-space: nowrap;
 }
 
+@media (max-height: 600px) {
+  h2 { font-size: clamp(19px, 4dvh, 24px); }
+  .drive-pad button { gap: 2px; font-size: 14px; border-radius: 10px; }
+  .drive-pad svg { width: clamp(17px, 4.3dvh, 25px); height: clamp(17px, 4.3dvh, 25px); }
+  .pose h3 { font-size: 18px; }
+  .pose dd { margin-top: 2px; font-size: 16px; }
+}
+
 @media (max-width: 780px) {
-  body { padding: 0 14px 20px; }
-  .masthead { min-height: 80px; padding: 12px 2px; }
+  .masthead { padding-inline: 2px; }
   .brand { gap: 11px; }
   .brand-icon { width: 47px; height: 47px; border-radius: 11px; }
   .brand-icon svg { width: 32px; height: 32px; }
   .connection { gap: 6px; }
-  .workspace { grid-template-columns: minmax(0, 1fr); gap: 15px; padding-top: 15px; }
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: clamp(7px, 1.8dvh, 15px);
+    padding-top: clamp(7px, 1.8dvh, 15px);
+  }
   .scene-header { padding: 7px 8px 13px; }
-  .camera { aspect-ratio: 10 / 7; }
-  .controls { padding: 19px; }
-  .drive-pad { width: min(100%, 258px); }
-  .pose dl { margin-top: 12px; }
+  .controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    column-gap: 12px;
+  }
+  .controls h2, .instructions { grid-column: 1 / -1; }
+  .drive-pad { grid-column: 1; width: min(100%, clamp(112px, 24dvh, 216px)); }
+  .keyboard { grid-column: 1; margin-top: 8px; }
+  .pose {
+    grid-column: 2;
+    grid-row: 3 / 5;
+    margin-top: clamp(8px, 3.4dvh, 36px);
+    padding: 0 0 0 12px;
+    border-top: 0;
+    border-left: 1px solid #49566c;
+  }
+  .pose dl { grid-template-columns: 1fr; gap: 4px; margin-top: 7px; }
+  .pose dl > div { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+  .pose dd { margin-top: 0; }
 }

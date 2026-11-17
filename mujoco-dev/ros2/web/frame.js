@@ -1,5 +1,5 @@
 // Only the newest available native framebuffer is transferred and uploaded.
-export function showFrames(canvas, report) {
+export function showFrames(canvas, report, readView) {
   const gl = canvas.getContext("webgl2", {alpha: false, depth: false, antialias: false});
   if (!gl) {
     report("浏览器无法启用 WebGL 2");
@@ -50,6 +50,7 @@ export function showFrames(canvas, report) {
   let request;
   let timer;
   let sequence = "";
+  let sentView;
   let allocated = false;
   const origin = `${window.location.protocol}//${window.location.hostname}:8767`;
 
@@ -58,8 +59,12 @@ export function showFrames(canvas, report) {
       request = new AbortController();
       const deadline = setTimeout(() => request.abort(), 800);
       try {
-        const response = await fetch(`${origin}/frame?after=${sequence}`, {signal: request.signal});
+        const view = readView();
+        const query = new URLSearchParams({after: sequence});
+        if (view !== sentView) query.set("view", view);
+        const response = await fetch(`${origin}/frame?${query}`, {signal: request.signal});
         if (!response.ok) throw new Error("Frame service unavailable");
+        sentView = view;
         if (response.status === 200) {
           const pixels = new Uint8Array(await response.arrayBuffer());
           if (stopped || gl.isContextLost()) return;
@@ -83,6 +88,7 @@ export function showFrames(canvas, report) {
         if (!stopped) report("等待本机 MuJoCo 画面");
         // Force an upload after the native process reconnects.
         sequence = "";
+        sentView = undefined;
       } finally {
         clearTimeout(deadline);
       }
@@ -97,7 +103,7 @@ export function showFrames(canvas, report) {
 
   function onRestored() {
     dispose();
-    cleanup = showFrames(canvas, report);
+    cleanup = showFrames(canvas, report, readView);
   }
 
   function dispose() {

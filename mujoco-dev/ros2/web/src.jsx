@@ -16,6 +16,9 @@ const buttons = [
   ["right", "右转", "ArrowRight D", "M21 5v5h-5m4.6 0a8.5 8.5 0 1 0-2 8"],
 ];
 
+const defaultView = {azimuth: 90, elevation: -90, zoom: 1, x: 0, y: 0};
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
 function useStatus() {
   const [status, setStatus] = useState({online: false, pose: null});
   useEffect(() => {
@@ -98,6 +101,10 @@ function useDrive(online) {
   useEffect(() => {
     const timer = setInterval(send, 85);
     function keydown(event) {
+      if (event.code === "ArrowDown") {
+        event.preventDefault();
+        return;
+      }
       if (event.metaKey || event.altKey || event.ctrlKey) return;
       const command = directions[event.code] ||
         (["Enter", "Space"].includes(event.code) && event.target.dataset?.command);
@@ -153,7 +160,71 @@ function App() {
   const readyOnce = useRef(false);
   if (online) readyOnce.current = true;
   const drive = useDrive(online);
-  useEffect(() => showFrames(camera.current, setFrameMessage), []);
+  useEffect(() => {
+    const canvas = camera.current;
+    const viewport = canvas.parentElement;
+    const listeners = new AbortController();
+    const {signal} = listeners;
+    let view = {...defaultView};
+    let drag;
+    const stopFrames = showFrames(canvas, setFrameMessage, () =>
+      [view.azimuth, view.elevation, view.zoom, view.x, view.y].map(value => value.toFixed(4)).join(",")
+    );
+
+    function zoomScene(event) {
+      if (event.metaKey || event.deltaY === 0) return;
+      event.preventDefault();
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1;
+      const sensitivity = event.ctrlKey ? 0.012 : 0.002;
+      view.zoom = clamp(view.zoom * Math.exp(-event.deltaY * unit * sensitivity), 1, 2.5);
+    }
+
+    function startDrag(event) {
+      if (drag || !event.isPrimary || ![0, 2].includes(event.button)) return;
+      event.preventDefault();
+      viewport.setPointerCapture(event.pointerId);
+      drag = {id: event.pointerId, x: event.clientX, y: event.clientY, pan: event.button === 2};
+      viewport.dataset.dragging = "true";
+    }
+
+    function moveCamera(event) {
+      if (drag?.id !== event.pointerId) return;
+      const dx = event.clientX - drag.x;
+      const dy = event.clientY - drag.y;
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      if (drag.pan || event.shiftKey) {
+        const angle = view.azimuth * Math.PI / 180;
+        const sin = Math.sin(angle);
+        const cos = Math.cos(angle);
+        const metresPerPixel = 4.4 / (view.zoom * Math.min(viewport.clientHeight, viewport.clientWidth * 0.7));
+        view.x = clamp(view.x + (dy * cos - dx * sin) * metresPerPixel, -2.5, 2.5);
+        view.y = clamp(view.y + (dy * sin + dx * cos) * metresPerPixel, -1.8, 1.8);
+      } else {
+        view.azimuth = (view.azimuth - dx * 0.28) % 360;
+        view.elevation = clamp(view.elevation + dy * 0.28, -90, -20);
+      }
+    }
+
+    function stopDrag(event) {
+      if (drag?.id !== event.pointerId) return;
+      drag = undefined;
+      delete viewport.dataset.dragging;
+    }
+
+    viewport.addEventListener("wheel", zoomScene, {passive: false, signal});
+    viewport.addEventListener("pointerdown", startDrag, {signal});
+    viewport.addEventListener("pointermove", moveCamera, {signal});
+    for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) {
+      viewport.addEventListener(event, stopDrag, {signal});
+    }
+    viewport.addEventListener("contextmenu", event => event.preventDefault(), {signal});
+    viewport.addEventListener("dblclick", () => { view = {...defaultView}; }, {signal});
+    return () => {
+      listeners.abort();
+      stopFrames();
+    };
+  }, []);
 
   return <>
     <header className="masthead">
@@ -174,8 +245,8 @@ function App() {
     <main className="workspace">
       <section className="panel scene" aria-labelledby="scene-heading">
         <div className="scene-header"><h2 id="scene-heading">试验场景</h2><span>实时画面</span></div>
-        <div className="camera">
-          <canvas ref={camera} role="img" aria-label="MuJoCo 围栏试验场俯视画面"/>
+        <div className="camera" title="拖动旋转，Shift + 拖动平移，滚轮缩放，双击恢复俯视">
+          <canvas ref={camera} role="img" aria-label="MuJoCo 围栏试验场画面"/>
           {frameMessage && <p>{frameMessage}</p>}
         </div>
       </section>

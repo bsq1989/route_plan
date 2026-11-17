@@ -4,6 +4,7 @@ import ctypes
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from math import isfinite
 from pathlib import Path
 from threading import Event, Lock, Thread
 from time import monotonic
@@ -19,6 +20,7 @@ WHEELS = ("left_wheel_joint", "right_wheel_joint")
 BRIDGE_PORT = 8765
 FRAME_PORT = 8767
 SIM_TIMEOUT = 0.25
+DEFAULT_VIEW = (90.0, -90.0, 1.0, 0.0, 0.0)
 
 
 class Latest:
@@ -30,6 +32,7 @@ class Latest:
         self.frame = b""
         self.frame_id = 0
         self.viewer_at = -float("inf")
+        self.camera_view = DEFAULT_VIEW
 
     def exchange(self, exit_signal):
         connection = HTTPConnection("127.0.0.1", BRIDGE_PORT, timeout=0.15)
@@ -55,6 +58,28 @@ class Latest:
             connection.close()
 
 
+def parse_camera_view(query):
+    values = tuple(map(float, query.split(",")))
+    if len(values) != len(DEFAULT_VIEW) or not all(map(isfinite, values)):
+        raise ValueError("Expected azimuth, elevation, zoom, x and y")
+    azimuth, elevation, zoom, x, y = values
+    return (
+        azimuth % 360,
+        min(-20, max(-90, elevation)),
+        min(2.5, max(1, zoom)),
+        min(2.5, max(-2.5, x)),
+        min(1.8, max(-1.8, y)),
+    )
+
+
+def set_camera_view(camera, view):
+    azimuth, elevation, zoom, x, y = view
+    camera.azimuth = azimuth
+    camera.elevation = elevation
+    camera.distance = 6.9 / zoom
+    camera.lookat[:] = (x, y, 0.2)
+
+
 class FrameHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     timeout = 2.0
@@ -65,9 +90,17 @@ class FrameHandler(BaseHTTPRequestHandler):
         if url.path != "/frame" or self.headers.get("Origin") != f"http://127.0.0.1:{BRIDGE_PORT}":
             self.send_error(404)
             return
-        after = parse_qs(url.query).get("after", [""])[0]
+        query = parse_qs(url.query)
+        after = query.get("after", [""])[0]
+        try:
+            view = parse_camera_view(query["view"][0]) if "view" in query else None
+        except ValueError:
+            self.send_error(400, "Invalid camera view")
+            return
         with latest.lock:
             latest.viewer_at = monotonic()
+            if view is not None:
+                latest.camera_view = view
             sequence = str(latest.frame_id)
             pixels = latest.frame if sequence != after else b""
 
@@ -103,8 +136,12 @@ def run_simulation(latest, exit_signal):
     body_velocity = np.empty(6)
     mujoco.mj_forward(model, data)
 
+    camera = mujoco.MjvCamera()
+    mujoco.mjv_defaultFreeCamera(model, camera)
+    model.vis.global_.fovy = model.cam_fovy[model.camera("arena_overview").id]
+    set_camera_view(camera, DEFAULT_VIEW)
     with mujoco.Renderer(model, width=WIDTH, height=HEIGHT) as renderer:
-        renderer.update_scene(data, camera="arena_overview")
+        renderer.update_scene(data, camera=camera)
         renderer.render()
         gl_string = ctypes.CDLL("/System/Library/Frameworks/OpenGL.framework/OpenGL").glGetString
         gl_string.argtypes = [ctypes.c_uint]
@@ -112,6 +149,7 @@ def run_simulation(latest, exit_signal):
         print(f"MuJoCo OpenGL renderer: {gl_string(0x1F01).decode()}", flush=True)
         print(f"Live frame service listening on 127.0.0.1:{FRAME_PORT}", flush=True)
         last_rendered = None
+        rendered_view = None
         frame_due = 0.0
         deadline = monotonic()
 
@@ -121,6 +159,7 @@ def run_simulation(latest, exit_signal):
                 connected = now - latest.wheels_at < SIM_TIMEOUT
                 wheels = latest.wheels if connected else (0.0, 0.0)
                 has_viewer = now - latest.viewer_at < 1.0
+                view = latest.camera_view
             data.ctrl[actuators] = wheels
             mujoco.mj_step(model, data, nstep=ticks_per_step)
             base_pose = data.qpos[base_start:base_start + 7]
@@ -139,13 +178,15 @@ def run_simulation(latest, exit_signal):
 
             if has_viewer and now >= frame_due:
                 visible_state = np.concatenate((base_pose, angles))
-                if last_rendered is None or np.max(np.abs(last_rendered - visible_state)) >= 0.0007:
-                    renderer.update_scene(data, camera="arena_overview")
+                if view != rendered_view or last_rendered is None or np.max(np.abs(last_rendered - visible_state)) >= 0.0007:
+                    set_camera_view(camera, view)
+                    renderer.update_scene(data, camera=camera)
                     pixels = renderer.render().tobytes()
                     with latest.lock:
                         latest.frame = pixels
                         latest.frame_id += 1
                     last_rendered = visible_state
+                    rendered_view = view
                     frame_due = now + 1 / 20
 
             deadline += interval
